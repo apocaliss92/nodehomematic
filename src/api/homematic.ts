@@ -14,6 +14,9 @@
  */
 
 import { CentralUnit, type JsonRpcClientLike } from '../central/central-unit.js';
+import type { HubFetcher } from '../central/hub/hub-fetcher.js';
+import type { SystemVariable } from '../central/hub/sysvar.js';
+import type { HmProgramRecord } from '../central/hub/program.js';
 import type { InterfaceClient } from '../transport/interface-client.js';
 import type { StorageBackend } from '../central/store/storage-backend.js';
 import type { DeviceNode } from '../central/graph.js';
@@ -48,6 +51,8 @@ import type {
   HmCustomEntity,
   HmDataPoint,
   HmDevice,
+  HmProgram,
+  HmSysVar,
   HmValue,
 } from './types.js';
 
@@ -213,6 +218,18 @@ export class Homematic {
   readonly #unsubscribers: Array<() => void> = [];
   #started = false;
 
+  // --- hub layer (Phase 5) ---------------------------------------------------
+  /** Bound hub fetcher, or undefined when no JSON-RPC client is available. */
+  #hub: HubFetcher | undefined;
+  /** Snapshot of system variables, refreshed on start / refreshHub. */
+  #sysvars: SystemVariable[] = [];
+  /** Snapshot of programs, refreshed on start / refreshHub. */
+  #programs: HmProgramRecord[] = [];
+  /** Device address → its aggregated room names (union of its channels'). */
+  #roomsByDevice = new Map<string, string[]>();
+  /** Device address → its aggregated function names (union of its channels'). */
+  #functionsByDevice = new Map<string, string[]>();
+
   /**
    * Build a facade that owns a real {@link CentralUnit} for `options`. (Tests
    * inject a pre-built central / transport stubs through the non-exported
@@ -267,6 +284,7 @@ export class Homematic {
       // points from the central's value cache so devices() shows values
       // immediately. Live pushes flow through the valueReceived subscription.
       this.#backfillSeededValues();
+      await this.#initHub();
     } catch (error: unknown) {
       // Roll back so a failed start does not wedge the facade: a subsequent
       // start() attempt is allowed (and will call central.start() again).
@@ -286,13 +304,28 @@ export class Homematic {
     this.#devicesByAddress.clear();
     this.#customEntityList = [];
     this.#customEntitiesByKey.clear();
+    this.#hub = undefined;
+    this.#sysvars = [];
+    this.#programs = [];
+    this.#roomsByDevice.clear();
+    this.#functionsByDevice.clear();
   }
 
   // --- public read surface --------------------------------------------------
 
-  /** An immutable snapshot of every known device. */
+  /**
+   * An immutable snapshot of every known device. The `rooms`/`functions` carried
+   * by each device are the union of the model's own metadata and the hub's
+   * channel-address-keyed ReGa mapping (Phase 5), aggregated to the device.
+   */
   public devices(): HmDevice[] {
-    return [...this.#devicesByAddress.values()].map(toHmDevice);
+    return [...this.#devicesByAddress.values()].map((device) =>
+      toHmDevice(
+        device,
+        this.#roomsByDevice.get(device.address),
+        this.#functionsByDevice.get(device.address),
+      ),
+    );
   }
 
   /** Current value of a data point (resolving the ref). */
@@ -365,6 +398,65 @@ export class Homematic {
       ccuValues[parameter] = convertToCcu(parameterSpecFromData(data), value, { enumAsIndex });
     }
     await this.#central.writeParamset(interfaceId, channelAddress, ParamsetKey.MASTER, ccuValues);
+  }
+
+  // --- hub: system variables + programs -------------------------------------
+
+  /**
+   * An immutable snapshot of every known system variable (empty when no hub /
+   * credentials). Refreshed at {@link Homematic.start} and {@link Homematic.refreshHub}.
+   */
+  public systemVariables(): HmSysVar[] {
+    return this.#sysvars.map(toHmSysVar);
+  }
+
+  /** Read a single system variable's current value by name. Throws if no hub. */
+  public async getSystemVariable(name: string): Promise<HmValue> {
+    return this.#requireHub().getSystemVariable(name);
+  }
+
+  /**
+   * Write a system variable by name. Validates against the snapshot BEFORE any
+   * network call: an unknown or read-only variable throws {@link ValidationError}
+   * (no write is attempted). Throws if no hub.
+   */
+  public async setSystemVariable(name: string, value: HmValue): Promise<void> {
+    const hub = this.#requireHub();
+    const sysvar = this.#sysvars.find((v) => v.name === name);
+    if (sysvar === undefined) {
+      throw new ValidationError(`Unknown system variable "${name}".`);
+    }
+    if (!sysvar.writable) {
+      throw new ValidationError(`System variable "${name}" is read-only.`);
+    }
+    await hub.setSystemVariable(name, value);
+  }
+
+  /**
+   * An immutable snapshot of every known program (empty when no hub). Refreshed
+   * at {@link Homematic.start} and {@link Homematic.refreshHub}.
+   */
+  public programs(): HmProgram[] {
+    return this.#programs.map(toHmProgram);
+  }
+
+  /** Execute a program, resolved by id or name from the snapshot. Throws if no hub. */
+  public async runProgram(idOrName: string): Promise<void> {
+    const hub = this.#requireHub();
+    await hub.runProgram(this.#resolveProgramId(idOrName));
+  }
+
+  /** Enable/disable a program, resolved by id or name. Throws if no hub. */
+  public async setProgramActive(idOrName: string, active: boolean): Promise<void> {
+    const hub = this.#requireHub();
+    await hub.setProgramActive(this.#resolveProgramId(idOrName), active);
+  }
+
+  /** Re-fetch the system-variable and program snapshots from the hub. Throws if no hub. */
+  public async refreshHub(): Promise<void> {
+    const hub = this.#requireHub();
+    this.#sysvars = await hub.fetchSystemVariables();
+    this.#programs = await hub.fetchPrograms();
   }
 
   // --- custom entities ------------------------------------------------------
@@ -760,6 +852,71 @@ export class Homematic {
     return dp;
   }
 
+  /**
+   * Best-effort hub initialisation, run at the end of {@link Homematic.start}.
+   * If a {@link HubFetcher} is available (credentials present), fetch the
+   * system-variable + program snapshots and the rooms/functions mapping. Every
+   * fetch is isolated: a failure on the real CCU (e.g. a ReGa script that errors
+   * on a given firmware) is logged and swallowed so it never wedges start().
+   */
+  async #initHub(): Promise<void> {
+    this.#hub = this.#central.getHubFetcher();
+    if (this.#hub === undefined) return;
+    const hub = this.#hub;
+    await this.#tryHub('system variables', async () => {
+      this.#sysvars = await hub.fetchSystemVariables();
+    });
+    await this.#tryHub('programs', async () => {
+      this.#programs = await hub.fetchPrograms();
+    });
+    await this.#tryHub('rooms/functions', async () => {
+      const { rooms, functions } = await hub.fetchRoomsFunctions();
+      this.#applyRoomsFunctions(rooms, functions);
+    });
+  }
+
+  /** Run a best-effort hub fetch; isolate + log any failure (never throws). */
+  async #tryHub(label: string, fn: () => Promise<void>): Promise<void> {
+    try {
+      await fn();
+    } catch (error: unknown) {
+      // Hub metadata is best-effort: a failure must not fail start(). Surface it
+      // for diagnostics without re-emitting it as a public `error` event.
+      console.warn(`nodehomematic: hub fetch "${label}" failed`, error);
+    }
+  }
+
+  /**
+   * Aggregate the channel-address-keyed rooms/functions maps to the DEVICE level
+   * (union of every channel's entries, plus any entry keyed by the bare device
+   * address) and store them for {@link Homematic.devices} to merge in. Replaces
+   * any previous mapping.
+   */
+  #applyRoomsFunctions(
+    rooms: ReadonlyMap<string, readonly string[]>,
+    functions: ReadonlyMap<string, readonly string[]>,
+  ): void {
+    this.#roomsByDevice = aggregateByDevice(rooms);
+    this.#functionsByDevice = aggregateByDevice(functions);
+  }
+
+  /** Resolve a program id-or-name to its id via the snapshot, or throw. */
+  #resolveProgramId(idOrName: string): string {
+    const byId = this.#programs.find((p) => p.id === idOrName);
+    if (byId !== undefined) return byId.id;
+    const byName = this.#programs.find((p) => p.name === idOrName);
+    if (byName !== undefined) return byName.id;
+    throw new ValidationError(`Unknown program "${idOrName}".`);
+  }
+
+  /** Return the bound hub fetcher, or throw if none (no credentials). */
+  #requireHub(): HubFetcher {
+    if (this.#hub === undefined) {
+      throw new ValidationError('Hub is unavailable (no WebUI credentials configured).');
+    }
+    return this.#hub;
+  }
+
   /** Find the interfaceId owning a channel via its parent device. */
   #interfaceIdForChannel(channelAddress: string): string {
     const deviceAddress = deviceAddressOf(channelAddress);
@@ -867,20 +1024,98 @@ function toHmCustomEntity(entity: CustomEntity): HmCustomEntity {
   throw new ValidationError(`Unsupported custom entity kind "${entity.kind}".`);
 }
 
-/** Map a {@link ModelDevice} to its public snapshot. */
-function toHmDevice(device: ModelDevice): HmDevice {
+/**
+ * Map a {@link ModelDevice} to its public snapshot, overlaying any hub-derived
+ * `rooms`/`functions` (union with the model's own, de-duplicated, order-stable).
+ */
+function toHmDevice(
+  device: ModelDevice,
+  hubRooms?: readonly string[],
+  hubFunctions?: readonly string[],
+): HmDevice {
   const channels: HmChannel[] = device.channels.map((channel) => ({
     address: channel.address,
     index: channel.index,
     ...(channel.type !== undefined ? { type: channel.type } : {}),
     dataPoints: channel.dataPoints.map(toHmDataPoint),
   }));
+  const rooms = unionStrings(device.rooms, hubRooms);
+  const functions = unionStrings(device.functions, hubFunctions);
   return {
     address: device.address,
     type: device.type,
     ...(device.name !== undefined ? { name: device.name } : {}),
-    ...(device.rooms !== undefined ? { rooms: device.rooms } : {}),
-    ...(device.functions !== undefined ? { functions: device.functions } : {}),
+    ...(rooms !== undefined ? { rooms } : {}),
+    ...(functions !== undefined ? { functions } : {}),
     channels,
   };
+}
+
+/** Map a {@link SystemVariable} to its public {@link HmSysVar} snapshot. */
+function toHmSysVar(sysvar: SystemVariable): HmSysVar {
+  return {
+    id: sysvar.id,
+    name: sysvar.name,
+    type: sysvar.type,
+    value: sysvar.value,
+    writable: sysvar.writable,
+    isInternal: sysvar.isInternal,
+    ...(sysvar.unit !== undefined ? { unit: sysvar.unit } : {}),
+    ...(sysvar.valueList !== undefined ? { valueList: sysvar.valueList } : {}),
+    ...(sysvar.min !== undefined ? { min: sysvar.min } : {}),
+    ...(sysvar.max !== undefined ? { max: sysvar.max } : {}),
+  };
+}
+
+/** Map a {@link HmProgramRecord} to its public {@link HmProgram} snapshot. */
+function toHmProgram(program: HmProgramRecord): HmProgram {
+  return {
+    id: program.id,
+    name: program.name,
+    isActive: program.isActive,
+    isInternal: program.isInternal,
+    ...(program.lastExecuteTime !== undefined ? { lastExecuteTime: program.lastExecuteTime } : {}),
+  };
+}
+
+/**
+ * Aggregate a channel-address-keyed map (`DEV:idx` → names) to the device level
+ * (`DEV` → union of all its channels' names). An entry keyed by the bare device
+ * address is included verbatim. Order-stable, de-duplicated.
+ */
+function aggregateByDevice(
+  byChannel: ReadonlyMap<string, readonly string[]>,
+): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const [address, names] of byChannel) {
+    const deviceAddress = deviceAddressOf(address);
+    const existing = out.get(deviceAddress) ?? [];
+    for (const name of names) {
+      if (!existing.includes(name)) existing.push(name);
+    }
+    out.set(deviceAddress, existing);
+  }
+  return out;
+}
+
+/**
+ * Union two optional string lists into one (de-duplicated, order-stable: base
+ * first, then any new extras). Returns `undefined` when both are empty so the
+ * snapshot omits the field rather than carrying an empty array.
+ */
+function unionStrings(
+  base: readonly string[] | undefined,
+  extra: readonly string[] | undefined,
+): readonly string[] | undefined {
+  if ((base === undefined || base.length === 0) && (extra === undefined || extra.length === 0)) {
+    return undefined;
+  }
+  const out: string[] = [];
+  for (const name of base ?? []) {
+    if (!out.includes(name)) out.push(name);
+  }
+  for (const name of extra ?? []) {
+    if (!out.includes(name)) out.push(name);
+  }
+  return out;
 }

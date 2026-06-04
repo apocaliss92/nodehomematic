@@ -45,6 +45,34 @@ export interface HmDevice {
 }
 
 /**
+ * A public snapshot of a CCU system variable (hub layer). Immutable; values are
+ * parsed into the {@link HmValue} domain. `writable` reflects the `HAHM`
+ * extended-sysvar marker — only writable variables may be set.
+ */
+export interface HmSysVar {
+  readonly id: string;
+  readonly name: string;
+  /** Normalised value type, e.g. `FLOAT`, `LOGIC`, `LIST`, `STRING`. */
+  readonly type: string;
+  readonly value: HmValue;
+  readonly unit?: string;
+  readonly writable: boolean;
+  readonly isInternal: boolean;
+  readonly valueList?: readonly string[];
+  readonly min?: number;
+  readonly max?: number;
+}
+
+/** A public snapshot of a CCU program (rule/automation). Immutable. */
+export interface HmProgram {
+  readonly id: string;
+  readonly name: string;
+  readonly isActive: boolean;
+  readonly isInternal: boolean;
+  readonly lastExecuteTime?: string;
+}
+
+/**
  * A reference to a data point, accepted by the facade's read/write methods.
  * Either the stable string id, or a structured `{ device, channel, parameter }`
  * locator (channel as the numeric index or full channel address).

@@ -27,6 +27,8 @@ export type {
   HmLight,
   HmCover,
   HmLock,
+  HmSysVar,
+  HmProgram,
 } from './api/types.js';
 
 export type {
