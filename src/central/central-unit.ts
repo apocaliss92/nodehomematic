@@ -20,6 +20,7 @@
 
 import { connect, type Socket } from 'node:net';
 import { Interface, INTERFACE_PORTS, ParamsetKey } from '../support/constants.js';
+import type { ParameterData } from '../transport/xmlrpc/types.js';
 import type { DataPointKey } from '../support/dpk.js';
 import { ClientState } from '../transport/resilience/state-machine.js';
 import { InterfaceClient } from '../transport/interface-client.js';
@@ -240,6 +241,58 @@ export class CentralUnit {
       return;
     }
     await runtime.client.setValue(dpk.channelAddress, dpk.parameter, value);
+  }
+
+  // --- config surface (Phase 3, Task 7) -------------------------------------
+
+  /**
+   * Read the discovered paramset DESCRIPTION (the spec — types, ranges, flags)
+   * for a channel + paramset key from the in-memory {@link ParamsetDescriptionCache}.
+   * Returns `undefined` if the paramset has not been discovered. This is the
+   * metadata used to render a device-configuration UI; it never touches the wire.
+   */
+  public getParamsetSpec(
+    interfaceId: string,
+    channelAddress: string,
+    paramsetKey: ParamsetKey | string,
+  ): Record<string, ParameterData> | undefined {
+    return this.paramsetCache.getParamset(interfaceId, channelAddress, String(paramsetKey));
+  }
+
+  /**
+   * Read the live VALUES of a paramset from the CCU, routing to the right
+   * {@link InterfaceClient} by `interfaceId`. Throws if the interface is unknown.
+   */
+  public async readParamset(
+    interfaceId: string,
+    channelAddress: string,
+    paramsetKey: ParamsetKey | string,
+  ): Promise<Record<string, unknown>> {
+    const client = this.clientFor(interfaceId);
+    return client.getParamset(channelAddress, paramsetKey as ParamsetKey);
+  }
+
+  /**
+   * Write a whole paramset to the CCU in one call, routing to the right
+   * {@link InterfaceClient} by `interfaceId`. Throws if the interface is unknown.
+   */
+  public async writeParamset(
+    interfaceId: string,
+    channelAddress: string,
+    paramsetKey: ParamsetKey | string,
+    values: Record<string, XmlRpcValue>,
+  ): Promise<void> {
+    const client = this.clientFor(interfaceId);
+    await client.putParamset(channelAddress, paramsetKey as ParamsetKey, values);
+  }
+
+  /** Resolve the {@link InterfaceClient} bound to `interfaceId`, or throw. */
+  private clientFor(interfaceId: string): InterfaceClient {
+    const runtime = this.runtimes.get(interfaceId);
+    if (runtime === undefined) {
+      throw new Error(`unknown interface "${interfaceId}"`);
+    }
+    return runtime.client;
   }
 
   // --- lifecycle ------------------------------------------------------------
