@@ -105,7 +105,12 @@ describe('central cycle (fake CCU, real central + transport modules)', () => {
     // Channels :0 and :1 are linked via CHILDREN.
     expect(device.channels.map((c) => c.address)).toEqual(['VCU0000001:0', 'VCU0000001:1']);
     const channel1 = device.channels.find((c) => c.address === 'VCU0000001:1')!;
-    expect([...channel1.parameters.keys()].sort()).toEqual(['CYCLIC_INFO_MSG', 'LEVEL', 'STATE']);
+    expect([...channel1.parameters.keys()].sort()).toEqual([
+      'CYCLIC_INFO_MSG',
+      'CYCLIC_INFO_MSG_DIS',
+      'LEVEL',
+      'STATE',
+    ]);
     expect(channel1.parameters.get('STATE')?.VALUES?.writable).toBe(true);
 
     expect(events.some((e) => e.type === 'ready')).toBe(true);

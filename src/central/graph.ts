@@ -26,8 +26,8 @@ export interface ParameterSpec {
   readonly type: ParameterType;
   readonly operations: number;
   readonly flags: number;
-  readonly min?: unknown;
-  readonly max?: unknown;
+  readonly min?: number;
+  readonly max?: number;
   readonly default?: unknown;
   readonly unit?: string;
   readonly valueList?: readonly string[];
@@ -58,8 +58,10 @@ export function parameterSpecFromData(data: ParameterData): ParameterSpec {
     hasEvents: hasEvents(operations),
     visible: isVisible(flags),
     // Optional fields are only present when supplied (exactOptionalPropertyTypes).
-    ...(data.MIN !== undefined ? { min: data.MIN } : {}),
-    ...(data.MAX !== undefined ? { max: data.MAX } : {}),
+    // min/max are narrowed to a number at construction; non-numeric CCU values
+    // (the type allows any XmlRpcValue) are dropped so the spec type holds.
+    ...(typeof data.MIN === 'number' ? { min: data.MIN } : {}),
+    ...(typeof data.MAX === 'number' ? { max: data.MAX } : {}),
     ...(data.DEFAULT !== undefined ? { default: data.DEFAULT } : {}),
     ...(data.UNIT !== undefined ? { unit: data.UNIT } : {}),
     ...(data.VALUE_LIST !== undefined ? { valueList: data.VALUE_LIST } : {}),
