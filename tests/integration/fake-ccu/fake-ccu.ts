@@ -100,6 +100,14 @@ const CANNED_PARAMSETS: Readonly<Record<string, Record<string, ParameterData>>> 
   },
   'VCU0000001:1|MASTER': {
     CYCLIC_INFO_MSG: { TYPE: 'BOOL', OPERATIONS: READ_WRITE, FLAGS: 1 },
+    CYCLIC_INFO_MSG_DIS: {
+      TYPE: 'INTEGER',
+      OPERATIONS: READ_WRITE,
+      FLAGS: 1,
+      MIN: 0,
+      MAX: 100,
+      DEFAULT: 28,
+    },
   },
   'VCU0000001:0|MASTER': {
     DUTY_CYCLE: { TYPE: 'BOOL', OPERATIONS: 1, FLAGS: 1 },
@@ -135,6 +143,7 @@ const XML_RPC_METHODS: readonly string[] = [
   'listDevices',
   'getDeviceDescription',
   'getParamsetDescription',
+  'getParamset',
   'getValue',
   'setValue',
   'putParamset',
@@ -354,6 +363,8 @@ export class FakeCcu {
         return this.handleGetDeviceDescription(params);
       case 'getParamsetDescription':
         return this.handleGetParamsetDescription(params);
+      case 'getParamset':
+        return this.handleGetParamset(params);
       case 'getValue':
         return this.handleGetValue(params);
       case 'setValue':
@@ -404,6 +415,23 @@ export class FakeCcu {
       return {} as XmlRpcValue;
     }
     return paramset as unknown as XmlRpcValue;
+  }
+
+  /**
+   * `getParamset(channelAddress, paramsetKey)` → the current values of every
+   * parameter in that paramset. Returns any value stored via `putParamset`,
+   * falling back to the paramset description's `DEFAULT` (or `0`).
+   */
+  private handleGetParamset(params: readonly XmlRpcValue[]): XmlRpcValue {
+    const channelAddress = asString(params[0], 'getParamset channelAddress');
+    const paramsetKey = asString(params[1], 'getParamset paramsetKey');
+    const description = CANNED_PARAMSETS[`${channelAddress}|${paramsetKey}`] ?? {};
+    const result: Record<string, XmlRpcValue> = {};
+    for (const [parameter, data] of Object.entries(description)) {
+      const stored = this.values.get(valueKey(channelAddress, parameter));
+      result[parameter] = stored ?? data.DEFAULT ?? 0;
+    }
+    return result as XmlRpcValue;
   }
 
   private handlePutParamset(params: readonly XmlRpcValue[]): XmlRpcValue {
