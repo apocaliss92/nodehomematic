@@ -15,9 +15,18 @@
       "require": "./dist/index.cjs"
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
-  "engines": { "node": ">=20" },
-  "repository": { "type": "git", "url": "git+https://github.com/apocaliss92/nodehomematic.git" },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/apocaliss92/nodehomematic.git"
+  },
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
@@ -28,7 +37,14 @@
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
-  "keywords": ["homematic", "homematicip", "ccu3", "raspberrymatic", "home-automation", "xml-rpc"],
+  "keywords": [
+    "homematic",
+    "homematicip",
+    "ccu3",
+    "raspberrymatic",
+    "home-automation",
+    "xml-rpc"
+  ],
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "^2.1.0",
