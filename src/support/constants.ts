@@ -25,6 +25,17 @@ export const INTERFACE_PORTS: Readonly<Record<Interface, InterfacePorts>> = {
   [Interface.VIRTUAL_DEVICES]: { nonTls: 9292, tls: 49292 },
 };
 
+/**
+ * Per-interface XML-RPC remote URL path (aiohomematic `remote_path`). Most
+ * interfaces expose their XML-RPC endpoint at the server root (`/`) and have NO
+ * entry here; only {@link Interface.VIRTUAL_DEVICES} (heating/virtual groups)
+ * answers at the `/groups` path on port 9292. The path is appended to
+ * `{scheme}://{host}:{port}` when building the proxy URL.
+ */
+export const INTERFACE_REMOTE_PATH: Partial<Record<Interface, string>> = {
+  [Interface.VIRTUAL_DEVICES]: '/groups',
+};
+
 /** JSON-RPC ports for the CCU WebUI. */
 export const JSON_RPC_PORT = 80;
 export const JSON_RPC_PORT_TLS = 443;

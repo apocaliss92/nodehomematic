@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   Interface,
   INTERFACE_PORTS,
+  INTERFACE_REMOTE_PATH,
   JSON_RPC_PATH,
   ENCODING_OUT,
   ENCODING_IN,
@@ -34,6 +35,13 @@ describe('support/constants', () => {
     expect(INTERFACE_PORTS[Interface.HMIP_RF]).toEqual({ nonTls: 2010, tls: 42010 });
     expect(INTERFACE_PORTS[Interface.BIDCOS_WIRED]).toEqual({ nonTls: 2000, tls: 42000 });
     expect(INTERFACE_PORTS[Interface.VIRTUAL_DEVICES]).toEqual({ nonTls: 9292, tls: 49292 });
+  });
+
+  it('INTERFACE_REMOTE_PATH mappa /groups solo per VirtualDevices', () => {
+    expect(INTERFACE_REMOTE_PATH[Interface.VIRTUAL_DEVICES]).toBe('/groups');
+    expect(INTERFACE_REMOTE_PATH[Interface.HMIP_RF]).toBeUndefined();
+    expect(INTERFACE_REMOTE_PATH[Interface.BIDCOS_RF]).toBeUndefined();
+    expect(INTERFACE_REMOTE_PATH[Interface.BIDCOS_WIRED]).toBeUndefined();
   });
 
   it('path e encoding di protocollo', () => {

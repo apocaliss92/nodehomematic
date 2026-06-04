@@ -19,7 +19,12 @@
  */
 
 import { connect, type Socket } from 'node:net';
-import { Interface, INTERFACE_PORTS, ParamsetKey } from '../support/constants.js';
+import {
+  Interface,
+  INTERFACE_PORTS,
+  INTERFACE_REMOTE_PATH,
+  ParamsetKey,
+} from '../support/constants.js';
 import type { ParameterData } from '../transport/xmlrpc/types.js';
 import type { DataPointKey } from '../support/dpk.js';
 import { ClientState } from '../transport/resilience/state-machine.js';
@@ -387,12 +392,15 @@ export class CentralUnit {
         : { username: this.credentials.username, password: this.credentials.password };
     const tls = this.tls;
     const port = this.portFor(iface);
+    // VirtualDevices serves XML-RPC at the `/groups` path; others at root.
+    const path = INTERFACE_REMOTE_PATH[iface];
     return new InterfaceClient({
       centralName: this.centralName,
       interface: iface,
       host: this.host,
       port,
       tls,
+      ...(path !== undefined ? { path } : {}),
       ...(auth !== undefined ? { auth } : {}),
       callbackUrlProvider: () => this.callbackUrl(),
     });

@@ -52,6 +52,12 @@ export interface InterfaceClientOptions {
   readonly host: string;
   /** Override the port; defaults to the interface's plain/TLS port. */
   readonly port?: number;
+  /**
+   * Optional XML-RPC remote URL path (e.g. `'/groups'` for VirtualDevices).
+   * Appended to `{scheme}://{host}:{port}`. Defaults to the server root (`/`)
+   * when omitted. The callback URL is unaffected by this.
+   */
+  readonly path?: string;
   /** Use HTTPS for the XML-RPC endpoint. */
   readonly tls?: boolean;
   /** Optional HTTP Basic auth credentials. */
@@ -119,7 +125,9 @@ export class InterfaceClient {
     const ports = INTERFACE_PORTS[options.interface];
     const port = options.port ?? (tls ? ports.tls : ports.nonTls);
     const scheme = tls ? 'https' : 'http';
-    const url = `${scheme}://${options.host}:${port}/`;
+    // Most interfaces serve XML-RPC at the root; VirtualDevices uses `/groups`.
+    const path = options.path ?? '/';
+    const url = `${scheme}://${options.host}:${port}${path}`;
     const makeClient = options.makeClient ?? defaultMakeClient;
     this.client = makeClient(url, options.auth, tls);
   }
