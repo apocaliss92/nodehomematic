@@ -40,7 +40,9 @@ export enum DeviceProfile {
   IP_SWITCH = 'IP_SWITCH',
   RF_SWITCH = 'RF_SWITCH',
   IP_DIMMER = 'IP_DIMMER',
+  RF_DIMMER = 'RF_DIMMER',
   IP_COVER = 'IP_COVER',
+  RF_COVER = 'RF_COVER',
   IP_BLIND = 'IP_BLIND',
   IP_THERMOSTAT = 'IP_THERMOSTAT',
   IP_THERMOSTAT_GROUP = 'IP_THERMOSTAT_GROUP',
@@ -97,6 +99,67 @@ export const PROFILE_CONFIGS: Partial<Record<DeviceProfile, ChannelGroupConfig>>
       0: [{ field: Field.LEVEL, parameter: 'LEVEL' }],
       3: [{ field: Field.STATE, parameter: 'STATE' }],
     },
+  },
+
+  // --- Light / Dimmer ---
+  // brightness (0..255) maps to the LEVEL float (0..1) on the primary channel.
+  [DeviceProfile.IP_DIMMER]: {
+    primaryChannel: 0,
+    fields: [{ field: Field.LEVEL, parameter: 'LEVEL', visible: true }],
+  },
+  [DeviceProfile.RF_DIMMER]: {
+    primaryChannel: 0,
+    fields: [{ field: Field.LEVEL, parameter: 'LEVEL', visible: true }],
+  },
+
+  // --- Cover / Blind ---
+  // position (0..100) maps to LEVEL; STOP is an action; DIRECTION reports travel.
+  // The DIRECTION field maps to ACTIVITY_STATE on HmIP and DIRECTION on RF, so
+  // only the parameter string differs between the IP and RF profiles.
+  [DeviceProfile.IP_COVER]: {
+    primaryChannel: 0,
+    fields: [
+      { field: Field.LEVEL, parameter: 'LEVEL', visible: true },
+      { field: Field.STOP, parameter: 'STOP' },
+      { field: Field.DIRECTION, parameter: 'ACTIVITY_STATE', visible: true },
+    ],
+  },
+  [DeviceProfile.RF_COVER]: {
+    primaryChannel: 0,
+    fields: [
+      { field: Field.LEVEL, parameter: 'LEVEL', visible: true },
+      { field: Field.STOP, parameter: 'STOP' },
+      { field: Field.DIRECTION, parameter: 'DIRECTION', visible: true },
+    ],
+  },
+  // Blind extends cover with slat tilt (LEVEL_2). HmIP blinds carry both LEVEL
+  // and LEVEL_2 on the same combined channel.
+  [DeviceProfile.IP_BLIND]: {
+    primaryChannel: 0,
+    fields: [
+      { field: Field.LEVEL, parameter: 'LEVEL', visible: true },
+      { field: Field.LEVEL_2, parameter: 'LEVEL_2', visible: true },
+      { field: Field.STOP, parameter: 'STOP' },
+      { field: Field.DIRECTION, parameter: 'ACTIVITY_STATE', visible: true },
+    ],
+  },
+
+  // --- Lock ---
+  // HmIP locks report LOCK_STATE and are commanded via LOCK_TARGET_LEVEL.
+  [DeviceProfile.IP_LOCK]: {
+    primaryChannel: 0,
+    fields: [
+      { field: Field.LOCK_STATE, parameter: 'LOCK_STATE', visible: true },
+      { field: Field.LOCK_TARGET_LEVEL, parameter: 'LOCK_TARGET_LEVEL' },
+    ],
+  },
+  // Classic RF locks report a boolean STATE and expose a separate OPEN action.
+  [DeviceProfile.RF_LOCK]: {
+    primaryChannel: 0,
+    fields: [
+      { field: Field.STATE, parameter: 'STATE', visible: true },
+      { field: Field.OPEN, parameter: 'OPEN' },
+    ],
   },
 };
 

@@ -11,6 +11,9 @@ import { deviceProfileRegistry } from './registry.js';
 import { DeviceProfile } from './profile.js';
 import { SwitchEntity } from './switch.js';
 import { ClimateEntity } from './climate.js';
+import { DimmerEntity } from './light.js';
+import { CoverEntity, BlindEntity } from './cover.js';
+import { IpLockEntity, RfLockEntity } from './lock.js';
 
 deviceProfileRegistry.register('HmIP-PS', {
   entityClass: SwitchEntity,
@@ -73,6 +76,75 @@ deviceProfileRegistry.register('HmIP-STH', {
 // actuator (12 channels), NOT a single thermostat. Registering it as a
 // ClimateEntity would mis-resolve, so it intentionally stays generic for now.
 
+// --- Light / Dimmer ---
+// HmIP dimmers carry LEVEL on a dedicated virtual-receiver channel: brand-mount
+// dimmer (BDT) ch4, flush-mount (FDT) ch2, plug dimmer (PDT) ch3.
+deviceProfileRegistry.register('HmIP-BDT', {
+  entityClass: DimmerEntity,
+  profile: DeviceProfile.IP_DIMMER,
+  channels: [4],
+});
+deviceProfileRegistry.register('HmIP-FDT', {
+  entityClass: DimmerEntity,
+  profile: DeviceProfile.IP_DIMMER,
+  channels: [2],
+});
+deviceProfileRegistry.register('HmIP-PDT', {
+  entityClass: DimmerEntity,
+  profile: DeviceProfile.IP_DIMMER,
+  channels: [3],
+});
+// Classic RF dimmers expose LEVEL on channel 1.
+deviceProfileRegistry.register('HM-LC-Dim', {
+  entityClass: DimmerEntity,
+  profile: DeviceProfile.RF_DIMMER,
+  channels: [1],
+});
+
+// --- Cover / Blind ---
+// HmIP roller shutters (BROLL/FROLL) and blinds (BBL/FBL) carry the cover
+// data points on the virtual-receiver channel 4.
+deviceProfileRegistry.register('HmIP-BROLL', {
+  entityClass: CoverEntity,
+  profile: DeviceProfile.IP_COVER,
+  channels: [4],
+});
+deviceProfileRegistry.register('HmIP-FROLL', {
+  entityClass: CoverEntity,
+  profile: DeviceProfile.IP_COVER,
+  channels: [4],
+});
+deviceProfileRegistry.register('HmIP-BBL', {
+  entityClass: BlindEntity,
+  profile: DeviceProfile.IP_BLIND,
+  channels: [4],
+});
+deviceProfileRegistry.register('HmIP-FBL', {
+  entityClass: BlindEntity,
+  profile: DeviceProfile.IP_BLIND,
+  channels: [4],
+});
+// Classic RF blind/shutter actuators expose the cover on channel 1.
+deviceProfileRegistry.register('HM-LC-Bl1', {
+  entityClass: CoverEntity,
+  profile: DeviceProfile.RF_COVER,
+  channels: [1],
+});
+
+// --- Lock ---
+// HmIP door-lock drive (DLD) carries LOCK_STATE/LOCK_TARGET_LEVEL on channel 1.
+deviceProfileRegistry.register('HmIP-DLD', {
+  entityClass: IpLockEntity,
+  profile: DeviceProfile.IP_LOCK,
+  channels: [1],
+});
+// Classic RF key/lock (HM-Sec-Key) exposes STATE/OPEN on channel 1.
+deviceProfileRegistry.register('HM-Sec-Key', {
+  entityClass: RfLockEntity,
+  profile: DeviceProfile.RF_LOCK,
+  channels: [1],
+});
+
 export { Field } from './fields.js';
 export { CustomEntity, type CustomEntityWriter, type CustomEntityInit } from './base.js';
 export { buildCustomEntities } from './resolve.js';
@@ -83,5 +155,8 @@ export {
   type ClimatePreset,
   type ClimateActivity,
 } from './climate.js';
+export { DimmerEntity } from './light.js';
+export { CoverEntity, BlindEntity } from './cover.js';
+export { IpLockEntity, RfLockEntity } from './lock.js';
 export { DeviceProfile, getProfileConfig } from './profile.js';
 export { deviceProfileRegistry, type DeviceConfig } from './registry.js';
