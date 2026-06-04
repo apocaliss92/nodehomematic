@@ -7,6 +7,18 @@ import {
   ENCODING_IN,
   TIMEOUTS,
   interfaceId,
+  Operations,
+  isReadable,
+  isWritable,
+  hasEvents,
+  Flag,
+  isVisible,
+  isService,
+  ParameterType,
+  ParamsetKey,
+  RxMode,
+  DeviceFirmwareState,
+  ParameterStatus,
 } from '../../../src/support/constants.js';
 
 describe('support/constants', () => {
@@ -37,5 +49,99 @@ describe('support/constants', () => {
 
   it('interfaceId compone centralName-interface', () => {
     expect(interfaceId('MyCCU', Interface.HMIP_RF)).toBe('MyCCU-HmIP-RF');
+  });
+
+  describe('Operations bitmask + gating', () => {
+    it('valori', () => {
+      expect(Operations.NONE).toBe(0);
+      expect(Operations.READ).toBe(1);
+      expect(Operations.WRITE).toBe(2);
+      expect(Operations.EVENT).toBe(4);
+    });
+
+    it('isReadable/isWritable/hasEvents leggono i bit', () => {
+      const rw = Operations.READ | Operations.WRITE;
+      expect(isReadable(rw)).toBe(true);
+      expect(isWritable(rw)).toBe(true);
+      expect(hasEvents(rw)).toBe(false);
+
+      const re = Operations.READ | Operations.EVENT;
+      expect(isReadable(re)).toBe(true);
+      expect(isWritable(re)).toBe(false);
+      expect(hasEvents(re)).toBe(true);
+
+      expect(isReadable(Operations.NONE)).toBe(false);
+      expect(isWritable(Operations.NONE)).toBe(false);
+      expect(hasEvents(Operations.NONE)).toBe(false);
+    });
+  });
+
+  describe('Flag bitmask + gating', () => {
+    it('valori', () => {
+      expect(Flag.VISIBLE).toBe(1);
+      expect(Flag.INTERNAL).toBe(2);
+      expect(Flag.TRANSFORM).toBe(4);
+      expect(Flag.SERVICE).toBe(8);
+      expect(Flag.STICKY).toBe(0x10);
+    });
+
+    it('isVisible/isService leggono i bit', () => {
+      expect(isVisible(Flag.VISIBLE)).toBe(true);
+      expect(isVisible(Flag.INTERNAL)).toBe(false);
+      expect(isService(Flag.SERVICE | Flag.VISIBLE)).toBe(true);
+      expect(isService(Flag.VISIBLE)).toBe(false);
+    });
+  });
+
+  it('ParameterType string enum', () => {
+    expect(ParameterType.ACTION).toBe('ACTION');
+    expect(ParameterType.BOOL).toBe('BOOL');
+    expect(ParameterType.ENUM).toBe('ENUM');
+    expect(ParameterType.FLOAT).toBe('FLOAT');
+    expect(ParameterType.INTEGER).toBe('INTEGER');
+    expect(ParameterType.STRING).toBe('STRING');
+    expect(ParameterType.DUMMY).toBe('DUMMY');
+    expect(ParameterType.EMPTY).toBe('');
+  });
+
+  it('ParamsetKey string enum', () => {
+    expect(ParamsetKey.MASTER).toBe('MASTER');
+    expect(ParamsetKey.VALUES).toBe('VALUES');
+    expect(ParamsetKey.LINK).toBe('LINK');
+    expect(ParamsetKey.SERVICE).toBe('SERVICE');
+    expect(ParamsetKey.CALCULATED).toBe('CALCULATED');
+    expect(ParamsetKey.COMBINED).toBe('COMBINED');
+    expect(ParamsetKey.DUMMY).toBe('DUMMY');
+  });
+
+  it('RxMode bitmask', () => {
+    expect(RxMode.UNDEFINED).toBe(0);
+    expect(RxMode.ALWAYS).toBe(1);
+    expect(RxMode.BURST).toBe(2);
+    expect(RxMode.CONFIG).toBe(4);
+    expect(RxMode.WAKEUP).toBe(8);
+    expect(RxMode.LAZY_CONFIG).toBe(16);
+  });
+
+  it('DeviceFirmwareState string enum', () => {
+    expect(DeviceFirmwareState.UNKNOWN).toBe('UNKNOWN');
+    expect(DeviceFirmwareState.UP_TO_DATE).toBe('UP_TO_DATE');
+    expect(DeviceFirmwareState.NEW_FIRMWARE_AVAILABLE).toBe('NEW_FIRMWARE_AVAILABLE');
+    expect(DeviceFirmwareState.READY_FOR_UPDATE).toBe('READY_FOR_UPDATE');
+    expect(DeviceFirmwareState.PERFORMING_UPDATE).toBe('PERFORMING_UPDATE');
+    expect(DeviceFirmwareState.BACKGROUND_UPDATE_NOT_SUPPORTED).toBe(
+      'BACKGROUND_UPDATE_NOT_SUPPORTED',
+    );
+  });
+
+  it('ParameterStatus string enum', () => {
+    expect(ParameterStatus.NORMAL).toBe('NORMAL');
+    expect(ParameterStatus.UNKNOWN).toBe('UNKNOWN');
+    expect(ParameterStatus.OVERFLOW).toBe('OVERFLOW');
+    expect(ParameterStatus.UNDERFLOW).toBe('UNDERFLOW');
+    expect(ParameterStatus.ERROR).toBe('ERROR');
+    expect(ParameterStatus.INVALID).toBe('INVALID');
+    expect(ParameterStatus.UNUSED).toBe('UNUSED');
+    expect(ParameterStatus.EXTERNAL).toBe('EXTERNAL');
   });
 });
