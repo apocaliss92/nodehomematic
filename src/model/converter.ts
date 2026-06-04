@@ -28,6 +28,25 @@ function toBool(raw: unknown): boolean {
   return Boolean(raw);
 }
 
+/**
+ * Stringify an untrusted value safely. Objects/arrays are JSON-encoded rather
+ * than relying on `Object.prototype.toString` (which would yield
+ * `[object Object]`); primitives use their natural string form.
+ */
+function safeStringify(raw: unknown): string {
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'number' || typeof raw === 'boolean' || typeof raw === 'bigint') {
+    return String(raw);
+  }
+  if (raw === null || raw === undefined) return String(raw);
+  if (typeof raw === 'symbol') return raw.toString();
+  try {
+    return JSON.stringify(raw) ?? Object.prototype.toString.call(raw);
+  } catch {
+    return Object.prototype.toString.call(raw);
+  }
+}
+
 /** Coerce to a finite number, or `null` if the value is empty / not a finite number. */
 function toFiniteNumberOrNull(raw: unknown): number | null {
   if (raw === '' || raw === null || raw === undefined) return null;
@@ -53,7 +72,7 @@ export function convertFromCcu(spec: ParameterSpec, raw: unknown): HmValue {
       return enumFromCcu(spec, raw);
 
     case ParameterType.STRING:
-      return String(raw);
+      return safeStringify(raw);
 
     case ParameterType.ACTION:
       return Boolean(raw);
@@ -61,7 +80,7 @@ export function convertFromCcu(spec: ParameterSpec, raw: unknown): HmValue {
     default:
       // Unknown / EMPTY / DUMMY: defensively reduce to a primitive.
       if (raw === '' || raw === null || raw === undefined) return null;
-      return String(raw);
+      return safeStringify(raw);
   }
 }
 
