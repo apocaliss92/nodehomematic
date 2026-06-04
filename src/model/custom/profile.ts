@@ -66,6 +66,38 @@ export const PROFILE_CONFIGS: Partial<Record<DeviceProfile, ChannelGroupConfig>>
     primaryChannel: 0,
     fields: [{ field: Field.STATE, parameter: 'STATE' }],
   },
+  [DeviceProfile.IP_THERMOSTAT]: {
+    primaryChannel: 0,
+    includeDefaultDataPoints: true,
+    fields: [
+      { field: Field.SETPOINT, parameter: 'SET_POINT_TEMPERATURE' },
+      { field: Field.TEMPERATURE, parameter: 'ACTUAL_TEMPERATURE', visible: true },
+      { field: Field.HUMIDITY, parameter: 'HUMIDITY', visible: true },
+      { field: Field.SET_POINT_MODE, parameter: 'SET_POINT_MODE' },
+      { field: Field.CONTROL_MODE, parameter: 'CONTROL_MODE' },
+      { field: Field.BOOST_MODE, parameter: 'BOOST_MODE' },
+      { field: Field.ACTIVE_PROFILE, parameter: 'ACTIVE_PROFILE' },
+    ],
+  },
+  [DeviceProfile.IP_THERMOSTAT_GROUP]: {
+    primaryChannel: 0,
+    includeDefaultDataPoints: false,
+    fields: [
+      { field: Field.SETPOINT, parameter: 'SET_POINT_TEMPERATURE' },
+      { field: Field.TEMPERATURE, parameter: 'ACTUAL_TEMPERATURE', visible: true },
+      { field: Field.HUMIDITY, parameter: 'HUMIDITY', visible: true },
+      { field: Field.SET_POINT_MODE, parameter: 'SET_POINT_MODE' },
+      { field: Field.CONTROL_MODE, parameter: 'CONTROL_MODE' },
+      { field: Field.BOOST_MODE, parameter: 'BOOST_MODE' },
+      { field: Field.ACTIVE_PROFILE, parameter: 'ACTIVE_PROFILE' },
+    ],
+    // Heating groups expose valve telemetry on channels relative to the base:
+    // offset 0 → LEVEL (valve %), offset 3 → STATE (valve open).
+    channelFields: {
+      0: [{ field: Field.LEVEL, parameter: 'LEVEL' }],
+      3: [{ field: Field.STATE, parameter: 'STATE' }],
+    },
+  },
 };
 
 /** Resolve a profile config, throwing if the profile has no registered config. */
