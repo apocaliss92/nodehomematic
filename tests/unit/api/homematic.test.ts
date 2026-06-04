@@ -477,6 +477,7 @@ describe('Homematic facade — getConfig strictness', () => {
       start: () => Promise.resolve(),
       stop: () => Promise.resolve(),
       getParamsetSpec: () => undefined,
+      getHubFetcher: () => undefined,
       readParamset: (_i: string, ch: string) => {
         readCalls.push(ch);
         return Promise.resolve({});

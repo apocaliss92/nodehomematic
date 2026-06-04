@@ -147,6 +147,57 @@ const CANNED_SUBSECTIONS: ReadonlyArray<Record<string, unknown>> = [
   { id: '5678', name: 'Security', channelIds: ['VCU0000001:1'] },
 ];
 
+/**
+ * Canned system variables returned by `SysVar.getAll`. One writable (its ReGa
+ * description carries the `HAHM` extended-sysvar marker) and one read-only.
+ */
+const SYSVAR_WRITABLE_NAME = 'HM_Presence';
+const SYSVAR_READONLY_NAME = 'HM_Temperature';
+const CANNED_SYSVARS: ReadonlyArray<Record<string, unknown>> = [
+  {
+    id: '20001',
+    name: SYSVAR_WRITABLE_NAME,
+    type: 'LOGIC',
+    value: 'true',
+    unit: '',
+    isInternal: false,
+  },
+  {
+    id: '20002',
+    name: SYSVAR_READONLY_NAME,
+    type: 'FLOAT',
+    value: '21.5',
+    unit: '°C',
+    isInternal: false,
+  },
+];
+
+/** ReGa sysvar descriptions: only the writable var carries the HAHM marker. */
+const CANNED_SYSVAR_DESCRIPTIONS: ReadonlyArray<Record<string, unknown>> = [
+  { id: '20001', description: 'extended HAHM presence flag' },
+  { id: '20002', description: 'plain temperature sensor' },
+];
+
+/** Canned programs returned by `Program.getAll`. */
+const PROGRAM_NAME = 'Goodnight';
+const CANNED_PROGRAMS: ReadonlyArray<Record<string, unknown>> = [
+  { id: '30001', name: PROGRAM_NAME, isActive: true, isInternal: false },
+  { id: '30002', name: 'Wakeup', isActive: false, isInternal: false },
+];
+
+/** Canned ReGa program descriptions. */
+const CANNED_PROGRAM_DESCRIPTIONS: ReadonlyArray<Record<string, unknown>> = [
+  { id: '30001', description: 'goodnight scene' },
+  { id: '30002', description: 'wakeup scene' },
+];
+
+/** Channel address used as the rooms/functions key in the canned ReGa output. */
+const ROOMS_FUNCTIONS_CHANNEL = 'VCU0000001:1';
+const ROOMS_FUNCTIONS_RESULT = JSON.stringify({
+  rooms: { [ROOMS_FUNCTIONS_CHANNEL]: ['Kitchen'] },
+  functions: { [ROOMS_FUNCTIONS_CHANNEL]: ['Light'] },
+});
+
 /** Supported XML-RPC method names, for `system.listMethods`. */
 const XML_RPC_METHODS: readonly string[] = [
   'init',
@@ -174,6 +225,10 @@ export class FakeCcu {
   private deregistration: string | undefined;
   /** Stored channel/parameter values, keyed by `${address}|${parameter}`. */
   private readonly values = new Map<string, XmlRpcValue>();
+  /** System-variable writes seen, keyed by name → last written value. */
+  private readonly sysvarWrites = new Map<string, unknown>();
+  /** Program ids executed, in order. */
+  private readonly programExecutions: string[] = [];
   /** When true, every XML-RPC request is refused (simulated outage). */
   private down = false;
   /** When true, `system.listMethods` faults (forces the getVersion fallback). */
@@ -250,6 +305,31 @@ export class FakeCcu {
   /** Read a value previously stored via `setValue` (or `undefined`). */
   public storedValue(address: string, parameter: string): XmlRpcValue | undefined {
     return this.values.get(valueKey(address, parameter));
+  }
+
+  /** The name of the canned WRITABLE system variable (HAHM marker). */
+  public get writableSysVarName(): string {
+    return SYSVAR_WRITABLE_NAME;
+  }
+
+  /** The name of the canned READ-ONLY system variable (no HAHM marker). */
+  public get readonlySysVarName(): string {
+    return SYSVAR_READONLY_NAME;
+  }
+
+  /** The name of the canned program. */
+  public get programName(): string {
+    return PROGRAM_NAME;
+  }
+
+  /** The last value written for a system variable by name, or `undefined`. */
+  public sysVarWrite(name: string): unknown {
+    return this.sysvarWrites.get(name);
+  }
+
+  /** True if a program with the given id was executed. */
+  public didExecuteProgram(id: string): boolean {
+    return this.programExecutions.includes(id);
   }
 
   /**
@@ -528,9 +608,71 @@ export class FakeCcu {
         return { result: CANNED_ROOMS, error: null };
       case 'Subsection.getAll':
         return { result: CANNED_SUBSECTIONS, error: null };
+      case 'SysVar.getAll':
+        return { result: CANNED_SYSVARS, error: null };
+      case 'SysVar.getValueByName':
+        return { result: this.handleSysVarGetByName(params), error: null };
+      case 'SysVar.setBool':
+        return { result: this.handleSysVarSet(params, true), error: null };
+      case 'SysVar.setFloat':
+        return { result: this.handleSysVarSet(params, false), error: null };
+      case 'Program.getAll':
+        return { result: CANNED_PROGRAMS, error: null };
+      case 'Program.execute':
+        return { result: this.handleProgramExecute(params), error: null };
+      case 'ReGa.runScript':
+        return { result: this.handleRegaRunScript(params), error: null };
       default:
         return { result: null, error: { code: -32601, message: 'method not found' } };
     }
+  }
+
+  /** Return the canned value of a system variable by name (raw string form). */
+  private handleSysVarGetByName(params: Record<string, unknown>): unknown {
+    const name = String(params['name'] ?? '');
+    const found = CANNED_SYSVARS.find((v) => v['name'] === name);
+    return found?.['value'] ?? null;
+  }
+
+  /** Record a system-variable write (bool → stored as 0/1, float → number). */
+  private handleSysVarSet(params: Record<string, unknown>, asBool: boolean): unknown {
+    const name = String(params['name'] ?? '');
+    const raw = params['value'];
+    this.sysvarWrites.set(name, asBool ? Number(raw) : Number(raw));
+    return true;
+  }
+
+  /** Record a program execution by id. */
+  private handleProgramExecute(params: Record<string, unknown>): unknown {
+    this.programExecutions.push(String(params['id'] ?? ''));
+    return true;
+  }
+
+  /**
+   * Dispatch a ReGa script by inspecting its body. The result is returned as the
+   * raw script output the {@link JsonRpcClient} surfaces (a JSON string for the
+   * description / rooms scripts; a trivial `''` ack for the set scripts).
+   */
+  private handleRegaRunScript(params: Record<string, unknown>): unknown {
+    const script = String(params['script'] ?? '');
+    if (script.includes('ID_SYSTEM_VARIABLES')) {
+      return JSON.stringify(CANNED_SYSVAR_DESCRIPTIONS);
+    }
+    if (script.includes('ID_PROGRAMS')) {
+      return JSON.stringify(CANNED_PROGRAM_DESCRIPTIONS);
+    }
+    if (script.includes('ChnRoom')) {
+      return ROOMS_FUNCTIONS_RESULT;
+    }
+    // A string-sysvar write (`set_system_variable`) or a program-state change.
+    if (script.includes('.State(')) {
+      const match = /dom\.GetObject\("([^"]*)"\)/.exec(script);
+      if (match) {
+        const stateMatch = /\.State\("([^"]*)"\)/.exec(script);
+        this.sysvarWrites.set(match[1] ?? '', stateMatch?.[1] ?? '');
+      }
+    }
+    return '';
   }
 
   private handleLogin(params: Record<string, unknown>): {
