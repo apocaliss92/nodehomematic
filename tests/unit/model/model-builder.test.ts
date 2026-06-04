@@ -120,14 +120,28 @@ describe('buildDevice', () => {
     expect(device.dataPoint('VCU0000001:1', 'PRESS_SHORT')?.hasEvents).toBe(true);
   });
 
-  it('skips a VALUES param that is neither readable nor event-emitting', () => {
+  it('includes a write-only VALUES param (e.g. cover STOP / lock target)', () => {
     const node = makeNode();
     const ch1 = node.channels[1] as ChannelNode;
-    (ch1.parameters as Map<string, ParameterSpecs>).set('WRITE_ONLY', {
-      VALUES: valuesSpec(ParameterType.FLOAT, Operations.WRITE),
+    (ch1.parameters as Map<string, ParameterSpecs>).set('STOP', {
+      VALUES: valuesSpec(ParameterType.ACTION, Operations.WRITE),
     });
     const device = buildDevice(node);
-    expect(device.dataPoint('VCU0000001:1', 'WRITE_ONLY')).toBeUndefined();
+    const dp = device.dataPoint('VCU0000001:1', 'STOP');
+    expect(dp).toBeDefined();
+    expect(dp?.writable).toBe(true);
+    expect(dp?.readable).toBe(false);
+    expect(dp?.hasEvents).toBe(false);
+  });
+
+  it('still skips a VALUES param that is neither readable, writable, nor event-emitting', () => {
+    const node = makeNode();
+    const ch1 = node.channels[1] as ChannelNode;
+    (ch1.parameters as Map<string, ParameterSpecs>).set('INTERNAL_ONLY', {
+      VALUES: valuesSpec(ParameterType.FLOAT, 0),
+    });
+    const device = buildDevice(node);
+    expect(device.dataPoint('VCU0000001:1', 'INTERNAL_ONLY')).toBeUndefined();
   });
 
   it('derives the interface family for HmIP devices', () => {

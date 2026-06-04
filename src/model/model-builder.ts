@@ -3,9 +3,12 @@
  * device graph ({@link DeviceNode}[], Phase 2).
  *
  * For each channel, every parameter that has a VALUES {@link ParameterSpec}
- * which is readable OR event-emitting becomes a live {@link GenericDataPoint}.
- * MASTER-only parameters are config and are handled separately (Task 7), so
- * they never become data points here.
+ * which is readable OR event-emitting OR writable becomes a live
+ * {@link GenericDataPoint}. Writable-only ACTION params (e.g. `STOP` on covers,
+ * `LOCK_TARGET_LEVEL` on locks) are command targets and must exist as data
+ * points so custom-entity commands can reach them. Pure-internal VALUES params
+ * with none of read/event/write are excluded. MASTER-only parameters are config
+ * and are handled separately (Task 7), so they never become data points here.
  */
 
 import type { DeviceNode, ChannelNode } from '../central/graph.js';
@@ -32,7 +35,7 @@ function buildChannel(
   const dataPoints: GenericDataPoint[] = [];
   for (const [parameter, specs] of channel.parameters) {
     const spec = specs.VALUES;
-    if (spec === undefined || (!spec.readable && !spec.hasEvents)) {
+    if (spec === undefined || (!spec.readable && !spec.hasEvents && !spec.writable)) {
       continue;
     }
     dataPoints.push(
