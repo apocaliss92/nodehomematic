@@ -81,9 +81,9 @@ describe('transport cycle (fake CCU, real transport modules)', () => {
       interfaceId: 'TestCCU-HmIP-RF',
     });
 
-    // 2. listDevices returns the canned descriptions.
+    // 2. listDevices returns the canned descriptions (device + two channels).
     const devices = await client.listDevices();
-    expect(devices.map((d) => d.ADDRESS)).toEqual(['VCU0000001', 'VCU0000001:1']);
+    expect(devices.map((d) => d.ADDRESS)).toEqual(['VCU0000001', 'VCU0000001:0', 'VCU0000001:1']);
 
     // 3. CCU pushes an event; the CallbackServer normalizes it.
     await fakeCcu.emitEvent('VCU0000001:1', 'STATE', true);
@@ -123,7 +123,13 @@ describe('transport cycle (fake CCU, real transport modules)', () => {
 
     const detail = await jsonClient.post(JsonRpcMethod.DEVICE_LIST_ALL_DETAIL, {}, { sessionId });
     expect(detail).toEqual([
-      { id: '4711', address: 'VCU0000001', name: 'Window Contact', type: 'HmIP-SWDO' },
+      {
+        id: '4711',
+        address: 'VCU0000001',
+        name: 'Window Contact',
+        type: 'HmIP-SWDO',
+        channels: [{ address: 'VCU0000001:1', name: 'Window Contact Sensor' }],
+      },
     ]);
 
     await jsonClient.close();

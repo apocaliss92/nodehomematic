@@ -55,7 +55,6 @@ describe.runIf(E2E)('transport e2e smoke (CCU reale)', () => {
 
     const detail = await client.post(JsonRpcMethod.DEVICE_LIST_ALL_DETAIL, {}, { sessionId });
     expect(Array.isArray(detail)).toBe(true);
-    // eslint-disable-next-line no-console
     console.log(`[e2e] Device.listAllDetail → ${(detail as unknown[]).length} dispositivi`);
 
     await session.logout();
@@ -75,7 +74,6 @@ describe.runIf(E2E)('transport e2e smoke (CCU reale)', () => {
     });
     const devices = await client.listDevices();
     expect(Array.isArray(devices)).toBe(true);
-    // eslint-disable-next-line no-console
     console.log(`[e2e] ${iface} listDevices → ${devices.length} entry (device+canali)`);
     expect(devices.length).toBeGreaterThan(0);
   }, 30_000);
@@ -104,7 +102,6 @@ describe.runIf(E2E)('transport e2e smoke (CCU reale)', () => {
       await client.initProxy();
       // breve finestra per ricevere eventuali push spontanei (newDevices/event/pong)
       await new Promise((r) => setTimeout(r, 8_000));
-      // eslint-disable-next-line no-console
       console.log(
         `[e2e] callback ricevuti in 8s: ${received.length}` +
           (received.length
