@@ -119,11 +119,63 @@ describe('central cycle (fake CCU, real central + transport modules)', () => {
     await central.stop();
   });
 
+  it('seeds initial VALUES at start without waiting for a pushed event', async () => {
+    // Pre-store a value on the CCU (no push). The central must read it during
+    // start() via getParamset(VALUES) and populate the value cache.
+    fakeCcu.setStoredValue('VCU0000001:1', 'STATE', true);
+
+    const { central, events } = buildCentral(fakeCcu, storage);
+    await central.start();
+
+    // No emitEvent here: the value must already be present from seeding.
+    const dpk = makeDpk(INTERFACE_ID, 'VCU0000001:1', 'VALUES', 'STATE');
+    expect(central.getValue(dpk)).toBe(true);
+    // Seeding also publishes valueReceived so the normal routing updates.
+    expect(events.some((e) => e.type === 'valueReceived')).toBe(true);
+
+    await central.stop();
+  });
+
+  it('does not seed initial values when fetchInitialValues is false', async () => {
+    fakeCcu.setStoredValue('VCU0000001:1', 'STATE', true);
+
+    const jsonClient = new JsonRpcClient({ url: fakeCcu.jsonRpcUrl });
+    const central = new CentralUnit({
+      centralName: CENTRAL_NAME,
+      host: CALLBACK_HOST,
+      interfaces: [Interface.HMIP_RF],
+      credentials: { username: USERNAME, password: PASSWORD },
+      callback: { host: CALLBACK_HOST, port: 0 },
+      storageBackend: storage,
+      jsonClient,
+      fetchInitialValues: false,
+      makeInterfaceClient: (iface) =>
+        new InterfaceClient({
+          centralName: CENTRAL_NAME,
+          interface: iface,
+          host: CALLBACK_HOST,
+          port: fakeCcu.port,
+          callbackUrlProvider: () => `http://${CALLBACK_HOST}:${central.callbackPort}`,
+        }),
+      timings: { connectionCheckMs: 60_000, valueRefreshMs: 60_000 },
+      recoverySleep: () => Promise.resolve(),
+    });
+    await central.start();
+
+    const dpk = makeDpk(INTERFACE_ID, 'VCU0000001:1', 'VALUES', 'STATE');
+    expect(central.getValue(dpk)).toBeUndefined();
+
+    await central.stop();
+  });
+
   it('routes a pushed event into the value cache and a valueReceived event', async () => {
     const { central, events } = buildCentral(fakeCcu, storage);
     await central.start();
 
     const dpk = makeDpk(INTERFACE_ID, 'VCU0000001:1', 'VALUES', 'STATE');
+
+    // Discard the start-time seed events so we isolate the pushed event below.
+    events.length = 0;
 
     await fakeCcu.emitEvent('VCU0000001:1', 'STATE', true);
     await waitFor(() => events.some((e) => e.type === 'valueReceived'));

@@ -26,7 +26,7 @@ import {
   ParamsetKey,
 } from '../support/constants.js';
 import type { ParameterData } from '../transport/xmlrpc/types.js';
-import type { DataPointKey } from '../support/dpk.js';
+import { makeDpk, type DataPointKey } from '../support/dpk.js';
 import { ClientState } from '../transport/resilience/state-machine.js';
 import { InterfaceClient } from '../transport/interface-client.js';
 import { JsonRpcClient } from '../transport/jsonrpc/client.js';
@@ -83,6 +83,11 @@ export interface CacheConfig {
   readonly enabled?: boolean;
 }
 
+/** Minimal logger used for the (best-effort) initial-seed debug summary. */
+export interface CentralLogger {
+  debug(message: string): void;
+}
+
 /** Tunable scheduler/recovery intervals (defaults match the prod plan). */
 export interface CentralTimings {
   /** Connection-check cadence in ms (prod: 15000). */
@@ -102,6 +107,14 @@ export interface CentralUnitOptions {
   readonly storageBackend?: StorageBackend;
   readonly tls?: boolean;
   readonly timings?: CentralTimings;
+  /**
+   * Seed each data point's value at start by reading the VALUES paramset of
+   * every discovered channel (best-effort). Mirrors aiohomematic: devices show
+   * values immediately, before the first CCU push. Defaults to `true`.
+   */
+  readonly fetchInitialValues?: boolean;
+  /** Optional logger for the initial-seed debug summary (defaults to no-op). */
+  readonly logger?: CentralLogger;
   /**
    * Override the TCP port per interface (some deployments expose the XML-RPC
    * endpoint on a non-standard port). Falls back to {@link INTERFACE_PORTS}.
@@ -130,6 +143,13 @@ const DEFAULT_VALUE_REFRESH_MS = 15_000;
 const CONNECTION_CHECK_JOB = 'connection-check';
 const VALUE_REFRESH_JOB = 'value-refresh';
 const TCP_CHECK_TIMEOUT_MS = 2_000;
+/** Max concurrent getParamset(VALUES) calls during initial-value seeding. */
+const SEED_CONCURRENCY = 8;
+const NOOP_LOGGER: CentralLogger = {
+  debug: () => {
+    /* no-op */
+  },
+};
 
 const DEVICE_CACHE_FILE = 'device_descriptions';
 const PARAMSET_CACHE_FILE = 'paramset_descriptions';
@@ -157,6 +177,8 @@ export class CentralUnit {
   private readonly valueRefreshMs: number;
   private readonly recoverySleep: (ms: number) => Promise<void>;
   private readonly tcpProbe: (interfaceId: string) => Promise<boolean>;
+  private readonly fetchInitialValues: boolean;
+  private readonly logger: CentralLogger;
 
   private readonly makeInterfaceClientFn: (iface: Interface) => InterfaceClient;
 
@@ -193,6 +215,8 @@ export class CentralUnit {
     this.valueRefreshMs = options.timings?.valueRefreshMs ?? DEFAULT_VALUE_REFRESH_MS;
     this.recoverySleep = options.recoverySleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.tcpProbe = options.tcpProbe ?? ((id) => this.defaultTcpCheck(id));
+    this.fetchInitialValues = options.fetchInitialValues ?? true;
+    this.logger = options.logger ?? NOOP_LOGGER;
     this.makeInterfaceClientFn =
       options.makeInterfaceClient ?? ((iface) => this.buildRealInterfaceClient(iface));
 
@@ -227,6 +251,17 @@ export class CentralUnit {
   /** Latest cached value for a data point, or `undefined`. */
   public getValue(dpk: DataPointKey): unknown {
     return this.valueCache.get(dpk)?.value;
+  }
+
+  /**
+   * Latest cached value + the time it was recorded, or `undefined` if the data
+   * point has no value yet. Lets the facade backfill data points it builds after
+   * start (e.g. seeded initial values published before the facade subscribed).
+   */
+  public getValueEntry(
+    dpk: DataPointKey,
+  ): { readonly value: unknown; readonly at: number } | undefined {
+    return this.valueCache.get(dpk);
   }
 
   /**
@@ -325,6 +360,10 @@ export class CentralUnit {
       this.rebuildFromCache();
     } else {
       await this.runFullDiscovery();
+    }
+
+    if (this.fetchInitialValues) {
+      await this.seedInitialValues();
     }
 
     this.registerSchedulerJobs();
@@ -544,6 +583,64 @@ export class CentralUnit {
     }
   }
 
+  /**
+   * Best-effort: seed each data point's value at start by reading the VALUES
+   * paramset of every discovered channel that has at least one VALUES parameter.
+   * Updates the {@link ValueCache} and publishes a `valueReceived` central event
+   * per (parameter, value) so the value flows through the normal routing path
+   * (facade/data points update automatically). Per-channel failures are caught
+   * and skipped (a channel may not support getParamset VALUES); start() never
+   * throws because of seeding. Runs with bounded concurrency to avoid flooding
+   * the CCU with hundreds of simultaneous calls.
+   */
+  private async seedInitialValues(): Promise<void> {
+    const tasks: Array<() => Promise<number>> = [];
+    for (const runtime of this.runtimes.values()) {
+      for (const node of this.registryStore.getAll()) {
+        if (node.interfaceId !== runtime.interfaceId) continue;
+        for (const channel of node.channels) {
+          if (!this.channelHasValuesParams(channel)) continue;
+          tasks.push(() => this.seedChannel(runtime, channel.address));
+        }
+      }
+    }
+    const seeded = await runBounded(tasks, SEED_CONCURRENCY);
+    if (seeded > 0) {
+      this.logger.debug(`seeded ${seeded} initial value(s) from VALUES paramsets`);
+    }
+  }
+
+  /** True if the channel advertises at least one VALUES parameter. */
+  private channelHasValuesParams(channel: DeviceNode['channels'][number]): boolean {
+    for (const [, specs] of channel.parameters) {
+      if (specs.VALUES !== undefined) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Read the VALUES paramset of one channel and route each (parameter, rawValue)
+   * pair through the value cache + a `valueReceived` event. Returns the number
+   * of values seeded (0 on any failure — best-effort, never throws).
+   */
+  private async seedChannel(runtime: InterfaceRuntime, channelAddress: string): Promise<number> {
+    let count = 0;
+    try {
+      const values = await runtime.client.getParamset(channelAddress, ParamsetKey.VALUES);
+      const receivedAt = this.now();
+      for (const [parameter, rawValue] of Object.entries(values)) {
+        const dpk = makeDpk(runtime.interfaceId, channelAddress, ParamsetKey.VALUES, parameter);
+        this.valueCache.add(dpk, rawValue, receivedAt);
+        await this.bus.publish({ type: 'valueReceived', dpk, value: rawValue, receivedAt });
+        count += 1;
+      }
+    } catch {
+      // A channel may not support getParamset(VALUES); skip it, do not abort.
+      return 0;
+    }
+    return count;
+  }
+
   /** Fetch (and cache) the JSON-RPC name/room/function details, if credentialed. */
   private async fetchDetails(): Promise<DeviceDetails | undefined> {
     if (this.jsonClient === undefined) return undefined;
@@ -758,4 +855,27 @@ function makeDpkValues(
   parameter: string,
 ): DataPointKey {
   return { interfaceId, channelAddress, paramsetKey: ParamsetKey.VALUES, parameter };
+}
+
+/**
+ * Run `tasks` with at most `limit` in flight at once, summing their numeric
+ * results. A tiny bounded-parallel map: `limit` workers pull from a shared
+ * index until the queue drains. Individual tasks are assumed to handle their
+ * own errors (return a count); this never rejects.
+ */
+async function runBounded(
+  tasks: ReadonlyArray<() => Promise<number>>,
+  limit: number,
+): Promise<number> {
+  let next = 0;
+  let total = 0;
+  const worker = async (): Promise<void> => {
+    while (next < tasks.length) {
+      const index = next++;
+      total += await tasks[index]!();
+    }
+  };
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => worker());
+  await Promise.all(workers);
+  return total;
 }

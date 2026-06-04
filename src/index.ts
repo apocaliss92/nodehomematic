@@ -21,6 +21,12 @@ export type {
   HmConfigParam,
   HmChannelConfig,
   DataPointRef,
+  HmCustomEntity,
+  HmClimate,
+  HmSwitch,
+  HmLight,
+  HmCover,
+  HmLock,
 } from './api/types.js';
 
 export type {

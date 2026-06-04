@@ -104,6 +104,18 @@ describe('facade cycle (fake CCU, real central + transport modules)', () => {
     expect(state.readable).toBe(true);
   });
 
+  it('reflects seeded initial values in getValue() right after start (no push)', async () => {
+    // The shared fakeCcu/storage are recreated per test in beforeEach, but this
+    // test needs the value stored BEFORE start(). Build a dedicated facade here.
+    await hm.stop();
+    fakeCcu.setStoredValue('VCU0000001:1', 'STATE', true);
+    hm = buildFacade(fakeCcu, storage);
+    await hm.start();
+
+    // No emitEvent: the value was seeded during start() via getParamset(VALUES).
+    expect(hm.getValue({ device: 'VCU0000001', channel: 1, parameter: 'STATE' })).toBe(true);
+  });
+
   it('re-emits a CCU push as a public valueChanged', async () => {
     const events: ValueChangedEvent[] = [];
     hm.on('valueChanged', (e) => events.push(e));

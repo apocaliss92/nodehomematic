@@ -1,0 +1,173 @@
+/**
+ * Profile configuration — declarative description of how a device profile lays
+ * its {@link Field}s out across channels. A {@link ChannelGroupConfig} is keyed
+ * relative to a base channel; {@link resolve} rebases the relative offsets onto
+ * the device's absolute channel indices.
+ */
+
+import { Field, type FieldMapping } from './fields.js';
+
+/**
+ * Describes the field layout of one profile, relative to a base channel.
+ *
+ * @property primaryChannel — RELATIVE offset of the entity's primary channel
+ *   from the base channel. Defaults to `0`.
+ * @property secondaryChannels — additional relative channel offsets that belong
+ *   to the same logical entity.
+ * @property stateChannelOffset — relative offset of the channel carrying the
+ *   primary state (used by some cover/lock profiles).
+ * @property fields — field mappings resolved on the primary channel (plus their
+ *   own `channelOffset`).
+ * @property channelFields — extra field mappings keyed by RELATIVE channel
+ *   offset (e.g. heating groups expose LEVEL on offset 0 and STATE on offset 3).
+ * @property includeDefaultDataPoints — whether ch0 default data points (battery,
+ *   RSSI…) apply. Groups set this to `false`.
+ */
+export interface ChannelGroupConfig {
+  readonly primaryChannel?: number;
+  readonly secondaryChannels?: readonly number[];
+  readonly stateChannelOffset?: number;
+  readonly fields: readonly FieldMapping[];
+  readonly channelFields?: Readonly<Record<number, readonly FieldMapping[]>>;
+  readonly includeDefaultDataPoints?: boolean;
+}
+
+/** A profile config is, for now, a single channel-group config. */
+export type ProfileConfig = ChannelGroupConfig;
+
+/** Known device profiles. The value mirrors the key as a stable string. */
+export enum DeviceProfile {
+  IP_SWITCH = 'IP_SWITCH',
+  RF_SWITCH = 'RF_SWITCH',
+  IP_DIMMER = 'IP_DIMMER',
+  RF_DIMMER = 'RF_DIMMER',
+  IP_COVER = 'IP_COVER',
+  RF_COVER = 'RF_COVER',
+  IP_BLIND = 'IP_BLIND',
+  IP_THERMOSTAT = 'IP_THERMOSTAT',
+  IP_THERMOSTAT_GROUP = 'IP_THERMOSTAT_GROUP',
+  RF_THERMOSTAT = 'RF_THERMOSTAT',
+  IP_LOCK = 'IP_LOCK',
+  RF_LOCK = 'RF_LOCK',
+}
+
+/**
+ * Static profile → config table. Populated incrementally by the families. Task 2
+ * seeds the switch profiles; later tasks add the rest.
+ *
+ * STATE lives on the entity's primary channel itself (channelOffset 0), so the
+ * mapping is the same for IP and RF switches; the registration's base channel
+ * selects the right physical channel.
+ */
+export const PROFILE_CONFIGS: Partial<Record<DeviceProfile, ChannelGroupConfig>> = {
+  [DeviceProfile.IP_SWITCH]: {
+    primaryChannel: 0,
+    fields: [{ field: Field.STATE, parameter: 'STATE' }],
+  },
+  [DeviceProfile.RF_SWITCH]: {
+    primaryChannel: 0,
+    fields: [{ field: Field.STATE, parameter: 'STATE' }],
+  },
+  [DeviceProfile.IP_THERMOSTAT]: {
+    primaryChannel: 0,
+    includeDefaultDataPoints: true,
+    fields: [
+      { field: Field.SETPOINT, parameter: 'SET_POINT_TEMPERATURE' },
+      { field: Field.TEMPERATURE, parameter: 'ACTUAL_TEMPERATURE', visible: true },
+      { field: Field.HUMIDITY, parameter: 'HUMIDITY', visible: true },
+      { field: Field.SET_POINT_MODE, parameter: 'SET_POINT_MODE' },
+      { field: Field.CONTROL_MODE, parameter: 'CONTROL_MODE' },
+      { field: Field.BOOST_MODE, parameter: 'BOOST_MODE' },
+      { field: Field.ACTIVE_PROFILE, parameter: 'ACTIVE_PROFILE' },
+    ],
+  },
+  [DeviceProfile.IP_THERMOSTAT_GROUP]: {
+    primaryChannel: 0,
+    includeDefaultDataPoints: false,
+    fields: [
+      { field: Field.SETPOINT, parameter: 'SET_POINT_TEMPERATURE' },
+      { field: Field.TEMPERATURE, parameter: 'ACTUAL_TEMPERATURE', visible: true },
+      { field: Field.HUMIDITY, parameter: 'HUMIDITY', visible: true },
+      { field: Field.SET_POINT_MODE, parameter: 'SET_POINT_MODE' },
+      { field: Field.CONTROL_MODE, parameter: 'CONTROL_MODE' },
+      { field: Field.BOOST_MODE, parameter: 'BOOST_MODE' },
+      { field: Field.ACTIVE_PROFILE, parameter: 'ACTIVE_PROFILE' },
+    ],
+    // Heating groups expose valve telemetry on channels relative to the base:
+    // offset 0 → LEVEL (valve %), offset 3 → STATE (valve open).
+    channelFields: {
+      0: [{ field: Field.LEVEL, parameter: 'LEVEL' }],
+      3: [{ field: Field.STATE, parameter: 'STATE' }],
+    },
+  },
+
+  // --- Light / Dimmer ---
+  // brightness (0..255) maps to the LEVEL float (0..1) on the primary channel.
+  [DeviceProfile.IP_DIMMER]: {
+    primaryChannel: 0,
+    fields: [{ field: Field.LEVEL, parameter: 'LEVEL', visible: true }],
+  },
+  [DeviceProfile.RF_DIMMER]: {
+    primaryChannel: 0,
+    fields: [{ field: Field.LEVEL, parameter: 'LEVEL', visible: true }],
+  },
+
+  // --- Cover / Blind ---
+  // position (0..100) maps to LEVEL; STOP is an action; DIRECTION reports travel.
+  // The DIRECTION field maps to ACTIVITY_STATE on HmIP and DIRECTION on RF, so
+  // only the parameter string differs between the IP and RF profiles.
+  [DeviceProfile.IP_COVER]: {
+    primaryChannel: 0,
+    fields: [
+      { field: Field.LEVEL, parameter: 'LEVEL', visible: true },
+      { field: Field.STOP, parameter: 'STOP' },
+      { field: Field.DIRECTION, parameter: 'ACTIVITY_STATE', visible: true },
+    ],
+  },
+  [DeviceProfile.RF_COVER]: {
+    primaryChannel: 0,
+    fields: [
+      { field: Field.LEVEL, parameter: 'LEVEL', visible: true },
+      { field: Field.STOP, parameter: 'STOP' },
+      { field: Field.DIRECTION, parameter: 'DIRECTION', visible: true },
+    ],
+  },
+  // Blind extends cover with slat tilt (LEVEL_2). HmIP blinds carry both LEVEL
+  // and LEVEL_2 on the same combined channel.
+  [DeviceProfile.IP_BLIND]: {
+    primaryChannel: 0,
+    fields: [
+      { field: Field.LEVEL, parameter: 'LEVEL', visible: true },
+      { field: Field.LEVEL_2, parameter: 'LEVEL_2', visible: true },
+      { field: Field.STOP, parameter: 'STOP' },
+      { field: Field.DIRECTION, parameter: 'ACTIVITY_STATE', visible: true },
+    ],
+  },
+
+  // --- Lock ---
+  // HmIP locks report LOCK_STATE and are commanded via LOCK_TARGET_LEVEL.
+  [DeviceProfile.IP_LOCK]: {
+    primaryChannel: 0,
+    fields: [
+      { field: Field.LOCK_STATE, parameter: 'LOCK_STATE', visible: true },
+      { field: Field.LOCK_TARGET_LEVEL, parameter: 'LOCK_TARGET_LEVEL' },
+    ],
+  },
+  // Classic RF locks report a boolean STATE and expose a separate OPEN action.
+  [DeviceProfile.RF_LOCK]: {
+    primaryChannel: 0,
+    fields: [
+      { field: Field.STATE, parameter: 'STATE', visible: true },
+      { field: Field.OPEN, parameter: 'OPEN' },
+    ],
+  },
+};
+
+/** Resolve a profile config, throwing if the profile has no registered config. */
+export function getProfileConfig(profile: DeviceProfile): ChannelGroupConfig {
+  const config = PROFILE_CONFIGS[profile];
+  if (config === undefined) {
+    throw new Error(`No profile config registered for profile: ${profile}`);
+  }
+  return config;
+}

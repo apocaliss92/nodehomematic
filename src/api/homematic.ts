@@ -26,12 +26,26 @@ import { GenericDataPoint } from '../model/data-point.js';
 import { convertFromCcu, convertToCcu } from '../model/converter.js';
 import { parameterSpecFromData } from '../central/graph.js';
 import type { ModelDevice } from '../model/device.js';
+import {
+  buildCustomEntities,
+  CustomEntity,
+  ClimateEntity,
+  SwitchEntity,
+  DimmerEntity,
+  CoverEntity,
+  BlindEntity,
+  IpLockEntity,
+  RfLockEntity,
+  type CustomEntityWriter,
+  type ClimateMode,
+} from '../model/custom/index.js';
 import { TypedEventEmitter } from './emitter.js';
 import type { HomematicEventMap } from './events.js';
 import type {
   DataPointRef,
   HmChannel,
   HmConfigParam,
+  HmCustomEntity,
   HmDataPoint,
   HmDevice,
   HmValue,
@@ -191,6 +205,11 @@ export class Homematic {
   /** Device address → model device. */
   readonly #devicesByAddress = new Map<string, ModelDevice>();
 
+  /** Every live custom entity, in build order. */
+  #customEntityList: CustomEntity[] = [];
+  /** `device:channel` → live custom entity, for command routing. */
+  readonly #customEntitiesByKey = new Map<string, CustomEntity>();
+
   readonly #unsubscribers: Array<() => void> = [];
   #started = false;
 
@@ -243,6 +262,11 @@ export class Homematic {
       await this.#central.start();
       this.#rebuildModel(this.#central.registry.getAll());
       this.#subscribe();
+      // Initial values may have been seeded by the central during start(),
+      // before the facade built its model / subscribed. Backfill those data
+      // points from the central's value cache so devices() shows values
+      // immediately. Live pushes flow through the valueReceived subscription.
+      this.#backfillSeededValues();
     } catch (error: unknown) {
       // Roll back so a failed start does not wedge the facade: a subsequent
       // start() attempt is allowed (and will call central.start() again).
@@ -260,6 +284,8 @@ export class Homematic {
     await this.#central.stop();
     this.#dataPointsById.clear();
     this.#devicesByAddress.clear();
+    this.#customEntityList = [];
+    this.#customEntitiesByKey.clear();
   }
 
   // --- public read surface --------------------------------------------------
@@ -341,7 +367,189 @@ export class Homematic {
     await this.#central.writeParamset(interfaceId, channelAddress, ParamsetKey.MASTER, ccuValues);
   }
 
+  // --- custom entities ------------------------------------------------------
+
+  /**
+   * An immutable snapshot of every live custom entity (Climate / Switch / Light
+   * / Cover / Lock), each mapped to its public {@link HmCustomEntity} shape by
+   * reading the entity's current getters. No functions leak into the snapshot;
+   * issue commands through the typed command methods below.
+   */
+  public customEntities(): HmCustomEntity[] {
+    return this.#customEntityList.map((entity) => toHmCustomEntity(entity));
+  }
+
+  /** Set a climate entity's target temperature (clamped to its range). */
+  public async climateSetTemperature(
+    device: string,
+    channel: string | number,
+    temperature: number,
+  ): Promise<void> {
+    await this.#climate(device, channel).setTemperature(temperature);
+  }
+
+  /** Set a climate entity's operating mode. */
+  public async climateSetMode(
+    device: string,
+    channel: string | number,
+    mode: ClimateMode,
+  ): Promise<void> {
+    await this.#climate(device, channel).setMode(mode);
+  }
+
+  /** Enable or disable a climate entity's boost mode. */
+  public async climateSetBoost(
+    device: string,
+    channel: string | number,
+    on: boolean,
+  ): Promise<void> {
+    await this.#climate(device, channel).setBoost(on);
+  }
+
+  /** Turn a switch entity on. */
+  public async switchTurnOn(device: string, channel: string | number): Promise<void> {
+    await this.#switch(device, channel).turnOn();
+  }
+
+  /** Turn a switch entity off. */
+  public async switchTurnOff(device: string, channel: string | number): Promise<void> {
+    await this.#switch(device, channel).turnOff();
+  }
+
+  /** Turn a light entity on (full brightness, or `brightness` 0..255 when given). */
+  public async lightTurnOn(
+    device: string,
+    channel: string | number,
+    brightness?: number,
+  ): Promise<void> {
+    const light = this.#light(device, channel);
+    await (brightness === undefined ? light.turnOn() : light.turnOn(brightness));
+  }
+
+  /** Turn a light entity off. */
+  public async lightTurnOff(device: string, channel: string | number): Promise<void> {
+    await this.#light(device, channel).turnOff();
+  }
+
+  /** Set a light entity's brightness (0..255). */
+  public async lightSetBrightness(
+    device: string,
+    channel: string | number,
+    brightness: number,
+  ): Promise<void> {
+    await this.#light(device, channel).setBrightness(brightness);
+  }
+
+  /** Open a cover entity fully. */
+  public async coverOpen(device: string, channel: string | number): Promise<void> {
+    await this.#cover(device, channel).open();
+  }
+
+  /** Close a cover entity fully. */
+  public async coverClose(device: string, channel: string | number): Promise<void> {
+    await this.#cover(device, channel).close();
+  }
+
+  /** Stop a cover entity where it is. */
+  public async coverStop(device: string, channel: string | number): Promise<void> {
+    await this.#cover(device, channel).stop();
+  }
+
+  /** Move a cover entity to `position` (0..100). */
+  public async coverSetPosition(
+    device: string,
+    channel: string | number,
+    position: number,
+  ): Promise<void> {
+    await this.#cover(device, channel).setPosition(position);
+  }
+
+  /** Lock a lock entity. */
+  public async lockLock(device: string, channel: string | number): Promise<void> {
+    await this.#lock(device, channel).lock();
+  }
+
+  /** Unlock a lock entity. */
+  public async lockUnlock(device: string, channel: string | number): Promise<void> {
+    await this.#lock(device, channel).unlock();
+  }
+
+  /** Release a lock entity's latch (open). */
+  public async lockOpen(device: string, channel: string | number): Promise<void> {
+    await this.#lock(device, channel).open();
+  }
+
   // --- internals ------------------------------------------------------------
+
+  /**
+   * Resolve the live custom entity for `(device, channel)`, asserting its
+   * `kind`. `channel` may be a numeric index, a numeric string, or the full
+   * channel address (normalised like the {@link DataPointRef} resolver). Throws
+   * {@link ValidationError} when absent or of the wrong kind.
+   */
+  #entity(device: string, channel: string | number, expectedKind: string): CustomEntity {
+    const channelAddress =
+      typeof channel === 'string' && (channel.includes(':') || channel.startsWith(`${device}:`))
+        ? channel
+        : `${device}:${channel}`;
+    const entity = this.#customEntitiesByKey.get(`${device}:${channelAddress}`);
+    if (entity === undefined) {
+      throw new ValidationError(`No custom entity for "${device}" channel "${channelAddress}".`);
+    }
+    if (entity.kind !== expectedKind) {
+      throw new ValidationError(
+        `Custom entity "${device}" channel "${channelAddress}" is a ${entity.kind}, not a ${expectedKind}.`,
+      );
+    }
+    return entity;
+  }
+
+  #climate(device: string, channel: string | number): ClimateEntity {
+    const entity = this.#entity(device, channel, 'climate');
+    if (!(entity instanceof ClimateEntity)) {
+      throw new ValidationError(`Custom entity for "${device}" is not a climate entity.`);
+    }
+    return entity;
+  }
+
+  #switch(device: string, channel: string | number): SwitchEntity {
+    const entity = this.#entity(device, channel, 'switch');
+    if (!(entity instanceof SwitchEntity)) {
+      throw new ValidationError(`Custom entity for "${device}" is not a switch entity.`);
+    }
+    return entity;
+  }
+
+  #light(device: string, channel: string | number): DimmerEntity {
+    const entity = this.#entity(device, channel, 'light');
+    if (!(entity instanceof DimmerEntity)) {
+      throw new ValidationError(`Custom entity for "${device}" is not a light entity.`);
+    }
+    return entity;
+  }
+
+  #cover(device: string, channel: string | number): CoverEntity {
+    // Both 'cover' and 'blind' kinds are CoverEntity instances.
+    const channelAddress =
+      typeof channel === 'string' && (channel.includes(':') || channel.startsWith(`${device}:`))
+        ? channel
+        : `${device}:${channel}`;
+    const entity = this.#customEntitiesByKey.get(`${device}:${channelAddress}`);
+    if (entity === undefined || !(entity instanceof CoverEntity)) {
+      throw new ValidationError(
+        `No cover custom entity for "${device}" channel "${channelAddress}".`,
+      );
+    }
+    return entity;
+  }
+
+  #lock(device: string, channel: string | number): IpLockEntity | RfLockEntity {
+    const entity = this.#entity(device, channel, 'lock');
+    if (entity instanceof IpLockEntity || entity instanceof RfLockEntity) {
+      return entity;
+    }
+    throw new ValidationError(`Custom entity for "${device}" is not a lock entity.`);
+  }
 
   /**
    * Route an error thrown by a public-event listener to the `error` event so it
@@ -368,6 +576,55 @@ export class Homematic {
     for (const device of buildModel(nodes)) {
       this.#indexDevice(device);
     }
+    this.#rebuildCustomEntities();
+  }
+
+  /**
+   * Rebuild the custom-entity views from the current model. Each entity is wired
+   * to {@link Homematic.#writeRaw} so commands flow through the same validated
+   * send path as {@link Homematic.setValue}.
+   */
+  #rebuildCustomEntities(): void {
+    const writer: CustomEntityWriter = (channelAddress, parameter, value) =>
+      this.#writeRaw(channelAddress, parameter, value);
+    const list: CustomEntity[] = [];
+    this.#customEntitiesByKey.clear();
+    for (const device of this.#devicesByAddress.values()) {
+      for (const entity of buildCustomEntities(device, writer)) {
+        list.push(entity);
+        this.#customEntitiesByKey.set(
+          `${entity.deviceAddress}:${entity.primaryChannelAddress}`,
+          entity,
+        );
+      }
+    }
+    this.#customEntityList = list;
+  }
+
+  /**
+   * Resolve the live data point for `(channelAddress, parameter)` and route a
+   * write through the SAME validate + convert + send path as
+   * {@link Homematic.setValue}: `dp.prepareWrite(value)` then `central.setValue`.
+   */
+  async #writeRaw(channelAddress: string, parameter: string, value: HmValue): Promise<void> {
+    const deviceAddress = deviceAddressOf(channelAddress);
+    const device = this.#devicesByAddress.get(deviceAddress);
+    if (device === undefined) {
+      throw new ValidationError(
+        `Unknown device "${deviceAddress}" for channel "${channelAddress}".`,
+      );
+    }
+    const dpId = dpkToUniqueId(
+      makeDpk(device.interfaceId, channelAddress, ParamsetKey.VALUES, parameter),
+    );
+    const dp = this.#dataPointsById.get(dpId);
+    if (dp === undefined) {
+      throw new ValidationError(
+        `Unknown data point ${channelAddress} ${parameter} on device "${deviceAddress}".`,
+      );
+    }
+    const ccu = dp.prepareWrite(value);
+    await this.#central.setValue(dp.dpk, ccu);
   }
 
   #indexDevice(device: ModelDevice): void {
@@ -424,6 +681,19 @@ export class Homematic {
     );
   }
 
+  /**
+   * Apply any values the central has already cached (e.g. seeded at start before
+   * the facade subscribed) onto the freshly-built data points. Silent: this is a
+   * one-shot catch-up, not a live change, so it emits no `valueChanged`.
+   */
+  #backfillSeededValues(): void {
+    for (const dp of this.#dataPointsById.values()) {
+      const entry = this.#central.getValueEntry(dp.dpk);
+      if (entry === undefined) continue;
+      dp.applyCcuValue(entry.value, entry.at);
+    }
+  }
+
   #onValueReceived(dpk: DataPointKey, value: unknown, receivedAt: number): void {
     const dp = this.#dataPointsById.get(dpkToUniqueId(dpk));
     if (dp === undefined) return;
@@ -447,11 +717,13 @@ export class Homematic {
       this.#removeDevice(address);
       this.#indexDevice(buildDevice(node));
     }
+    this.#rebuildCustomEntities();
     this.#emitter.emit('deviceAdded', { device: address });
   }
 
   #onDeviceRemoved(address: string): void {
     this.#removeDevice(address);
+    this.#rebuildCustomEntities();
     this.#emitter.emit('deviceRemoved', { device: address });
   }
 
@@ -548,6 +820,51 @@ function toHmDataPoint(dp: GenericDataPoint): HmDataPoint {
     ...(min !== undefined ? { min } : {}),
     ...(max !== undefined ? { max } : {}),
   };
+}
+
+/**
+ * Map a live {@link CustomEntity} to its public {@link HmCustomEntity} snapshot
+ * by reading its current getters. The discriminated union is keyed by `kind`.
+ */
+function toHmCustomEntity(entity: CustomEntity): HmCustomEntity {
+  const device = entity.deviceAddress;
+  const channel = entity.primaryChannelAddress;
+  if (entity instanceof ClimateEntity) {
+    return {
+      kind: 'climate',
+      device,
+      channel,
+      currentTemperature: entity.currentTemperature,
+      targetTemperature: entity.targetTemperature,
+      currentHumidity: entity.currentHumidity,
+      minTemp: entity.minTemp,
+      maxTemp: entity.maxTemp,
+      targetTemperatureStep: entity.targetTemperatureStep,
+      mode: entity.mode,
+      preset: entity.preset,
+      activity: entity.activity,
+    };
+  }
+  if (entity instanceof SwitchEntity) {
+    return { kind: 'switch', device, channel, isOn: entity.isOn };
+  }
+  if (entity instanceof DimmerEntity) {
+    return { kind: 'light', device, channel, isOn: entity.isOn, brightness: entity.brightness };
+  }
+  if (entity instanceof CoverEntity) {
+    return {
+      kind: entity.kind === 'blind' ? 'blind' : 'cover',
+      device,
+      channel,
+      currentPosition: entity.currentPosition,
+      isClosed: entity.isClosed,
+      ...(entity instanceof BlindEntity ? { currentTiltPosition: entity.currentTiltPosition } : {}),
+    };
+  }
+  if (entity instanceof IpLockEntity || entity instanceof RfLockEntity) {
+    return { kind: 'lock', device, channel, isLocked: entity.isLocked };
+  }
+  throw new ValidationError(`Unsupported custom entity kind "${entity.kind}".`);
 }
 
 /** Map a {@link ModelDevice} to its public snapshot. */
