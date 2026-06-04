@@ -5,3 +5,6 @@ dist/
 coverage/
 .env
 .npmrc
+
+# Internal dev-process docs (specs/plans) — must NOT be published
+docs/superpowers/
