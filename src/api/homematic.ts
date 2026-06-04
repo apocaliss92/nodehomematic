@@ -19,7 +19,7 @@ import type { StorageBackend } from '../central/store/storage-backend.js';
 import type { DeviceNode } from '../central/graph.js';
 import type { ParameterData } from '../transport/xmlrpc/types.js';
 import { Interface, ParamsetKey, isWritable } from '../support/constants.js';
-import { ValidationError } from '../support/errors.js';
+import { ValidationError, DescriptionNotFoundError } from '../support/errors.js';
 import { makeDpk, dpkToUniqueId, type DataPointKey } from '../support/dpk.js';
 import { buildModel, buildDevice, interfaceFamilyOf } from '../model/model-builder.js';
 import { GenericDataPoint } from '../model/data-point.js';
@@ -67,20 +67,67 @@ export interface HomematicOptions {
   readonly tls?: boolean;
   /** Logical central name; defaults to `'nodehomematic'`. */
   readonly centralName?: string;
-
-  // --- injectables (tests), forwarded verbatim to the CentralUnit ----------
-  readonly storageBackend?: StorageBackend;
-  readonly makeInterfaceClient?: (iface: Interface) => InterfaceClient;
-  readonly jsonClient?: JsonRpcClientLike;
-  /**
-   * Inject a fully-constructed {@link CentralUnit} (tests). When supplied, it is
-   * used verbatim and the other CCU options are ignored; only `interfaces` is
-   * still validated so an empty/unknown configuration fails fast.
-   */
-  readonly central?: CentralUnit;
 }
 
 const DEFAULT_CENTRAL_NAME = 'nodehomematic';
+
+/**
+ * Module-level symbol marking the INTERNAL test-construction path. It is NOT
+ * exported from the package entrypoint (`src/index.ts`), so it never reaches
+ * the published surface; tests import it directly from this module.
+ */
+export const HOMEMATIC_TEST_INIT: unique symbol = Symbol('nodehomematic.test-init');
+
+/**
+ * Test-only injectables, forwarded into the {@link CentralUnit} the facade
+ * builds. Never exported from the package entrypoint — referencing internal
+ * transport/central types here would otherwise bleed them into the public
+ * `.d.ts`. CRUCIAL: this type is referenced ONLY by the (non-exported)
+ * {@link createHomematicForTest} free function, never by a member of the
+ * {@link Homematic} class, so it cannot leak the internal type graph into the
+ * published declaration of `Homematic`.
+ */
+export interface HomematicTestInjectables {
+  /**
+   * Inject a fully-constructed {@link CentralUnit}. When supplied it is used
+   * verbatim and the other CCU options are ignored; only `interfaces` is still
+   * validated so an empty/unknown configuration fails fast.
+   */
+  readonly central?: CentralUnit;
+  readonly storageBackend?: StorageBackend;
+  readonly makeInterfaceClient?: (iface: Interface) => InterfaceClient;
+  readonly jsonClient?: JsonRpcClientLike;
+}
+
+/**
+ * Module-private channel handing test injectables to the next {@link Homematic}
+ * constructor call. Kept off the class so the published `Homematic` type never
+ * references the internal {@link HomematicTestInjectables} graph. Marked with
+ * {@link HOMEMATIC_TEST_INIT} as a defensive sanity check.
+ */
+let pendingTestInjectables:
+  | { readonly [HOMEMATIC_TEST_INIT]: true; readonly injectables: HomematicTestInjectables }
+  | undefined;
+
+/**
+ * INTERNAL test-construction helper. Builds a {@link Homematic} wiring its
+ * {@link CentralUnit} from the supplied {@link HomematicTestInjectables}. NOT
+ * exported from the package entrypoint; tests import it directly from this
+ * module. The injectables travel through a module-private variable rather than
+ * the public constructor signature, so the published `Homematic` declaration
+ * stays free of internal types.
+ */
+export function createHomematicForTest(
+  options: HomematicOptions,
+  injectables: HomematicTestInjectables,
+): Homematic {
+  pendingTestInjectables = { [HOMEMATIC_TEST_INIT]: true, injectables };
+  try {
+    return new Homematic(options);
+  } finally {
+    pendingTestInjectables = undefined;
+  }
+}
 
 /** Map a public interface string to the internal {@link Interface} enum. */
 function toInterface(name: string): Interface {
@@ -99,9 +146,45 @@ function deviceAddressOf(channelAddress: string): string {
   return colon === -1 ? channelAddress : channelAddress.slice(0, colon);
 }
 
+/**
+ * Build the {@link CentralUnit} backing a facade. Validates `interfaces`, then
+ * either reuses an injected central (tests) or constructs a real one, forwarding
+ * any test injectables. Injectables are empty for public construction.
+ */
+function buildCentral(
+  options: HomematicOptions,
+  injectables: HomematicTestInjectables,
+): CentralUnit {
+  const interfaces = options.interfaces.map(toInterface);
+  if (interfaces.length === 0) {
+    throw new ValidationError('At least one interface is required.');
+  }
+  if (injectables.central !== undefined) {
+    return injectables.central;
+  }
+  return new CentralUnit({
+    centralName: options.centralName ?? DEFAULT_CENTRAL_NAME,
+    host: options.host,
+    interfaces,
+    callback: options.callback,
+    ...(options.credentials !== undefined ? { credentials: options.credentials } : {}),
+    ...(options.cache !== undefined ? { cache: options.cache } : {}),
+    ...(options.tls !== undefined ? { tls: options.tls } : {}),
+    ...(injectables.storageBackend !== undefined
+      ? { storageBackend: injectables.storageBackend }
+      : {}),
+    ...(injectables.makeInterfaceClient !== undefined
+      ? { makeInterfaceClient: injectables.makeInterfaceClient }
+      : {}),
+    ...(injectables.jsonClient !== undefined ? { jsonClient: injectables.jsonClient } : {}),
+  });
+}
+
 export class Homematic {
   readonly #central: CentralUnit;
-  readonly #emitter = new TypedEventEmitter<HomematicEventMap>();
+  readonly #emitter: TypedEventEmitter<HomematicEventMap>;
+  /** Guard against re-entrant error emission when an `error` listener throws. */
+  #emittingError = false;
 
   /** dpId (lowercased unique id) → live data point. */
   readonly #dataPointsById = new Map<string, GenericDataPoint>();
@@ -111,29 +194,17 @@ export class Homematic {
   readonly #unsubscribers: Array<() => void> = [];
   #started = false;
 
+  /**
+   * Build a facade that owns a real {@link CentralUnit} for `options`. (Tests
+   * inject a pre-built central / transport stubs through the non-exported
+   * {@link createHomematicForTest}, which never widens this public signature.)
+   */
   public constructor(options: HomematicOptions) {
-    const interfaces = options.interfaces.map(toInterface);
-    if (interfaces.length === 0) {
-      throw new ValidationError('At least one interface is required.');
-    }
-    if (options.central !== undefined) {
-      this.#central = options.central;
-      return;
-    }
-    this.#central = new CentralUnit({
-      centralName: options.centralName ?? DEFAULT_CENTRAL_NAME,
-      host: options.host,
-      interfaces,
-      callback: options.callback,
-      ...(options.credentials !== undefined ? { credentials: options.credentials } : {}),
-      ...(options.cache !== undefined ? { cache: options.cache } : {}),
-      ...(options.tls !== undefined ? { tls: options.tls } : {}),
-      ...(options.storageBackend !== undefined ? { storageBackend: options.storageBackend } : {}),
-      ...(options.makeInterfaceClient !== undefined
-        ? { makeInterfaceClient: options.makeInterfaceClient }
-        : {}),
-      ...(options.jsonClient !== undefined ? { jsonClient: options.jsonClient } : {}),
-    });
+    const injectables = pendingTestInjectables?.injectables ?? {};
+    this.#central = buildCentral(options, injectables);
+    this.#emitter = new TypedEventEmitter<HomematicEventMap>((error) =>
+      this.#onListenerError(error),
+    );
   }
 
   // --- public event API -----------------------------------------------------
@@ -168,9 +239,16 @@ export class Homematic {
   public async start(): Promise<void> {
     if (this.#started) return;
     this.#started = true;
-    await this.#central.start();
-    this.#rebuildModel(this.#central.registry.getAll());
-    this.#subscribe();
+    try {
+      await this.#central.start();
+      this.#rebuildModel(this.#central.registry.getAll());
+      this.#subscribe();
+    } catch (error: unknown) {
+      // Roll back so a failed start does not wedge the facade: a subsequent
+      // start() attempt is allowed (and will call central.start() again).
+      this.#started = false;
+      throw error;
+    }
   }
 
   /** Stop the central and clear all subscriptions and the model index. */
@@ -223,10 +301,15 @@ export class Homematic {
   public async getConfig(channelAddress: string): Promise<Record<string, HmValue>> {
     const interfaceId = this.#interfaceIdForChannel(channelAddress);
     const spec = this.#central.getParamsetSpec(interfaceId, channelAddress, ParamsetKey.MASTER);
+    if (spec === undefined) {
+      throw new DescriptionNotFoundError(
+        `No MASTER paramset description discovered for channel "${channelAddress}".`,
+      );
+    }
     const raw = await this.#central.readParamset(interfaceId, channelAddress, ParamsetKey.MASTER);
     const out: Record<string, HmValue> = {};
     for (const [parameter, value] of Object.entries(raw)) {
-      const data = spec?.[parameter];
+      const data = spec[parameter];
       out[parameter] =
         data === undefined
           ? coerceUnknownToHmValue(value)
@@ -259,6 +342,25 @@ export class Homematic {
   }
 
   // --- internals ------------------------------------------------------------
+
+  /**
+   * Route an error thrown by a public-event listener to the `error` event so it
+   * is surfaced rather than swallowed. If the failing listener was itself an
+   * `error` listener (or another `error` listener throws while we re-emit), we
+   * fall back to `console.error` to avoid unbounded recursion.
+   */
+  #onListenerError(error: unknown): void {
+    if (this.#emittingError) {
+      console.error('nodehomematic: error event listener threw', error);
+      return;
+    }
+    this.#emittingError = true;
+    try {
+      this.#emitter.emit('error', error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      this.#emittingError = false;
+    }
+  }
 
   #rebuildModel(nodes: readonly DeviceNode[]): void {
     this.#dataPointsById.clear();
@@ -362,7 +464,14 @@ export class Homematic {
       }
       return dp;
     }
-    const channelAddress = `${ref.device}:${ref.channel}`;
+    // `channel` may be a numeric index, a numeric string, or already a full
+    // channel address (`DEV:idx`). Only concatenate when it is a bare index;
+    // otherwise use it verbatim to avoid producing `DEV:DEV:idx`.
+    const channel = ref.channel;
+    const channelAddress =
+      typeof channel === 'string' && (channel.includes(':') || channel.startsWith(`${ref.device}:`))
+        ? channel
+        : `${ref.device}:${channel}`;
     const device = this.#devicesByAddress.get(ref.device);
     if (device === undefined) {
       throw new ValidationError(`Unknown device "${ref.device}".`);
@@ -436,8 +545,8 @@ function toHmDataPoint(dp: GenericDataPoint): HmDataPoint {
     hasEvents: dp.hasEvents,
     ...(dp.unit !== undefined ? { unit: dp.unit } : {}),
     ...(dp.valueList !== undefined ? { valueList: dp.valueList } : {}),
-    ...(typeof min === 'number' ? { min } : {}),
-    ...(typeof max === 'number' ? { max } : {}),
+    ...(min !== undefined ? { min } : {}),
+    ...(max !== undefined ? { max } : {}),
   };
 }
 

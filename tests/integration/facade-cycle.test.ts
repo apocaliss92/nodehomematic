@@ -11,7 +11,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FakeCcu } from './fake-ccu/fake-ccu.js';
-import { Homematic } from '../../src/api/homematic.js';
+import { Homematic, createHomematicForTest } from '../../src/api/homematic.js';
 import { InterfaceClient } from '../../src/transport/interface-client.js';
 import { JsonRpcClient } from '../../src/transport/jsonrpc/client.js';
 import { InMemoryStorageBackend } from '../../src/central/store/storage-backend.js';
@@ -61,12 +61,14 @@ function buildFacade(fakeCcu: FakeCcu, storage: InMemoryStorageBackend): Homemat
     recoverySleep: () => Promise.resolve(),
   });
   holder.central = central;
-  return new Homematic({
-    host: CALLBACK_HOST,
-    interfaces: ['HmIP-RF'],
-    callback: { host: CALLBACK_HOST, port: 0 },
-    central,
-  });
+  return createHomematicForTest(
+    {
+      host: CALLBACK_HOST,
+      interfaces: ['HmIP-RF'],
+      callback: { host: CALLBACK_HOST, port: 0 },
+    },
+    { central },
+  );
 }
 
 describe('facade cycle (fake CCU, real central + transport modules)', () => {

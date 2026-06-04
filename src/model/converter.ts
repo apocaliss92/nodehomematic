@@ -167,10 +167,10 @@ function numberToCcu(spec: ParameterSpec, value: HmValue, requireInteger: boolea
   if (requireInteger && !Number.isInteger(num)) {
     throw new ValidationError(`INTEGER parameter requires an integer value: ${String(value)}`);
   }
-  if (typeof spec.min === 'number' && num < spec.min) {
+  if (spec.min !== undefined && num < spec.min) {
     throw new ValidationError(`Value ${num} is below minimum ${spec.min}.`);
   }
-  if (typeof spec.max === 'number' && num > spec.max) {
+  if (spec.max !== undefined && num > spec.max) {
     throw new ValidationError(`Value ${num} is above maximum ${spec.max}.`);
   }
   return num;

@@ -31,7 +31,7 @@ export interface HmChannel {
   readonly address: string;
   readonly index: number;
   readonly type?: string;
-  readonly dataPoints: HmDataPoint[];
+  readonly dataPoints: readonly HmDataPoint[];
 }
 
 /** A public snapshot of a single device. */
@@ -41,7 +41,7 @@ export interface HmDevice {
   readonly name?: string;
   readonly rooms?: readonly string[];
   readonly functions?: readonly string[];
-  readonly channels: HmChannel[];
+  readonly channels: readonly HmChannel[];
 }
 
 /**

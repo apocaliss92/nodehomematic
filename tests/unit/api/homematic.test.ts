@@ -7,13 +7,13 @@
  * `valueReceived` through the central's own event bus and assert the facade's
  * public re-emission + read/write behavior.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { Homematic } from '../../../src/api/homematic.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { Homematic, createHomematicForTest } from '../../../src/api/homematic.js';
 import { CentralUnit } from '../../../src/central/central-unit.js';
 import type { InterfaceClient } from '../../../src/transport/interface-client.js';
 import { InMemoryStorageBackend } from '../../../src/central/store/storage-backend.js';
 import { Interface, ParamsetKey } from '../../../src/support/constants.js';
-import { ValidationError } from '../../../src/support/errors.js';
+import { ValidationError, DescriptionNotFoundError } from '../../../src/support/errors.js';
 import { makeDpk } from '../../../src/support/dpk.js';
 import type {
   DeviceDescription,
@@ -121,12 +121,14 @@ describe('Homematic facade', () => {
   beforeEach(async () => {
     stub = new StubClient(INTERFACE_ID);
     central = buildCentral(stub);
-    hm = new Homematic({
-      host: '127.0.0.1',
-      interfaces: ['HmIP-RF'],
-      callback: { host: '127.0.0.1', port: 0 },
-      central,
-    });
+    hm = createHomematicForTest(
+      {
+        host: '127.0.0.1',
+        interfaces: ['HmIP-RF'],
+        callback: { host: '127.0.0.1', port: 0 },
+      },
+      { central },
+    );
     await hm.start();
   });
 
@@ -195,6 +197,16 @@ describe('Homematic facade', () => {
   it('getValue resolves a structured ref', async () => {
     await pushValue('STATE', true, 1000);
     expect(hm.getValue({ device: 'VCU1', channel: 1, parameter: 'STATE' })).toBe(true);
+  });
+
+  it('getValue resolves channel as index, numeric string, or full address identically', async () => {
+    await pushValue('STATE', true, 1000);
+    const byIndex = hm.getValue({ device: 'VCU1', channel: 1, parameter: 'STATE' });
+    const byNumericString = hm.getValue({ device: 'VCU1', channel: '1', parameter: 'STATE' });
+    const byFullAddress = hm.getValue({ device: 'VCU1', channel: 'VCU1:1', parameter: 'STATE' });
+    expect(byIndex).toBe(true);
+    expect(byNumericString).toBe(true);
+    expect(byFullAddress).toBe(true);
   });
 
   it('getValue resolves a string dpId', async () => {
@@ -356,11 +368,107 @@ describe('Homematic facade', () => {
     expect(config['EXTRA_OBJ']).toBe('{"nested":1}');
   });
 
+  it('surfaces a throwing valueChanged listener via the error event; other listeners still run', async () => {
+    const errors: Error[] = [];
+    const ran: string[] = [];
+    const boom = new Error('listener boom');
+    hm.on('error', (e) => errors.push(e));
+    hm.on('valueChanged', () => {
+      throw boom;
+    });
+    hm.on('valueChanged', () => ran.push('second'));
+
+    await pushValue('STATE', true, 1000);
+
+    expect(errors).toContain(boom);
+    expect(ran).toEqual(['second']);
+  });
+
+  it('does not recurse when an error listener throws (falls back to console.error)', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      hm.on('error', () => {
+        throw new Error('error-listener boom');
+      });
+      hm.on('valueChanged', () => {
+        throw new Error('value boom');
+      });
+      await pushValue('STATE', true, 1000);
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('stop is idempotent and start after stop re-subscribes', async () => {
     await hm.stop();
     expect(hm.devices()).toHaveLength(0);
     await hm.stop(); // no-op
     await hm.start();
     expect(hm.devices()).toHaveLength(1);
+  });
+});
+
+describe('Homematic facade — start() atomicity', () => {
+  it('resets #started when central.start rejects so a retry calls central.start again', async () => {
+    const startCalls: number[] = [];
+    let attempt = 0;
+    const fakeCentral = {
+      registry: { getAll: () => [] },
+      eventBus: { subscribe: () => () => {} },
+      start: () => {
+        attempt += 1;
+        startCalls.push(attempt);
+        return Promise.reject(new Error('central down'));
+      },
+      stop: () => Promise.resolve(),
+    } as unknown as CentralUnit;
+
+    const hm = createHomematicForTest(
+      { host: '127.0.0.1', interfaces: ['HmIP-RF'], callback: { host: '127.0.0.1', port: 0 } },
+      { central: fakeCentral },
+    );
+
+    await expect(hm.start()).rejects.toThrow('central down');
+    // A second attempt is allowed (not wedged by the first failure).
+    await expect(hm.start()).rejects.toThrow('central down');
+    expect(startCalls).toEqual([1, 2]);
+  });
+});
+
+describe('Homematic facade — getConfig strictness', () => {
+  it('throws DescriptionNotFoundError when no MASTER spec is discovered for the channel', async () => {
+    const readCalls: string[] = [];
+    const fakeCentral = {
+      registry: {
+        getAll: () => [
+          {
+            address: 'VCU9',
+            type: 'HmIP-X',
+            interfaceId: INTERFACE_ID,
+            channels: [{ address: 'VCU9:1', index: 1, parameters: new Map() }],
+            raw: {},
+          },
+        ],
+      },
+      eventBus: { subscribe: () => () => {} },
+      start: () => Promise.resolve(),
+      stop: () => Promise.resolve(),
+      getParamsetSpec: () => undefined,
+      readParamset: (_i: string, ch: string) => {
+        readCalls.push(ch);
+        return Promise.resolve({});
+      },
+    } as unknown as CentralUnit;
+
+    const hm = createHomematicForTest(
+      { host: '127.0.0.1', interfaces: ['HmIP-RF'], callback: { host: '127.0.0.1', port: 0 } },
+      { central: fakeCentral },
+    );
+    await hm.start();
+
+    await expect(hm.getConfig('VCU9:1')).rejects.toThrow(DescriptionNotFoundError);
+    // The read must not happen when the spec is missing.
+    expect(readCalls).toHaveLength(0);
   });
 });

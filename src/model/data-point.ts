@@ -98,11 +98,11 @@ export class GenericDataPoint {
     return this.#spec.valueList;
   }
 
-  public get min(): unknown {
+  public get min(): number | undefined {
     return this.#spec.min;
   }
 
-  public get max(): unknown {
+  public get max(): number | undefined {
     return this.#spec.max;
   }
 
