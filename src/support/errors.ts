@@ -127,16 +127,23 @@ const NETWORK_ERROR_NAMES = new Set<string>(['AbortError', 'TimeoutError', 'Conn
  */
 export function mapTransportError(err: unknown): BaseHomematicError {
   if (err instanceof Error) {
-    const code = (err as { code?: unknown }).code;
-    if (typeof code === 'string' && NETWORK_ERROR_CODES.has(code)) {
+    // fetch/undici wraps the real socket error in `.cause`; inspect both levels.
+    if (isNetworkError(err)) {
       return new NoConnectionError(err.message);
     }
-    if (NETWORK_ERROR_NAMES.has(err.name)) {
-      return new NoConnectionError(err.message);
+    const cause = (err as { cause?: unknown }).cause;
+    if (cause instanceof Error && isNetworkError(cause)) {
+      return new NoConnectionError(cause.message);
     }
     return new ClientError(err.message);
   }
   return new ClientError(String(err));
+}
+
+function isNetworkError(err: Error): boolean {
+  const code = (err as { code?: unknown }).code;
+  if (typeof code === 'string' && NETWORK_ERROR_CODES.has(code)) return true;
+  return NETWORK_ERROR_NAMES.has(err.name);
 }
 
 /** Reduce a thrown error to a coarse {@link FailureReason}. */
