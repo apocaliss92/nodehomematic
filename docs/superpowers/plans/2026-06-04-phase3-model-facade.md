@@ -101,6 +101,18 @@ tests/unit/model/...  tests/unit/api/...  tests/integration/facade-*.test.ts
 - Aggiorna/aggiungi un e2e reale `tests/e2e/facade-smoke.test.ts` (gated HM_E2E): `new Homematic({...da env})`, `start()`, assert `devices().length>0` e che i DP abbiano metadati (type/readable), attesa breve `valueChanged`, `stop()`. READ-ONLY.
 - Commit: `test(api): facade integration + e2e smoke`.
 
+### Task 7: Device configuration (paramset MASTER) sulla facade — per costruire una UI di config
+Obiettivo: esporre i building-block per una UI di configurazione dispositivi (tipo il pannello nativo di HA `homematicip_local`): device → canali → parametri MASTER con metadati per generare i form, + lettura/scrittura dei valori MASTER.
+- Il `model-builder`/`GenericDataPoint` riguardano i VALUES (stato live). La configurazione MASTER è SEPARATA: usa le descrizioni MASTER già in `ParamsetDescriptionCache` (scoperte in Fase 2) + `getParamset`/`putParamset` di `InterfaceClient`.
+- Tipi pubblici (`api/types.ts`): `HmConfigParam { parameter, type, min?, max?, default?, unit?, valueList?, flags, writable }` e `HmChannelConfig { channelAddress, params: HmConfigParam[] }`.
+- Sulla facade `Homematic`:
+  - `getConfigParams(channelAddress: string): HmConfigParam[]` — gli SPEC dei parametri MASTER del canale (dalla paramset cache via `central`), per generare i form. (Esporre dal CentralUnit un accessor read-only alla `ParamsetDescriptionCache` o un metodo `central.getParamsetSpec(interfaceId, channelAddress, 'MASTER')`.)
+  - `async getConfig(channelAddress: string): Promise<Record<string, HmValue>>` — valori MASTER correnti (delega a `central` → `InterfaceClient.getParamset(channelAddress, 'MASTER')`, converte via converter).
+  - `async setConfig(channelAddress: string, values: Record<string, HmValue>): Promise<void>` — valida ogni valore contro lo spec MASTER (range/enum/tipo, writable) e scrive in un solo `putParamset(channelAddress, 'MASTER', ccuValues)`.
+- Estendere `CentralUnit` con: `getParamsetSpec(interfaceId, channelAddress, paramsetKey): Record<string, ParameterData> | undefined` (read della paramset cache) e `getParamset(dpkOrChannel, paramsetKey)` / `putParamset(channelAddress, paramsetKey, values)` che instradano all'`InterfaceClient` giusto per interfaceId.
+- Test: `getConfigParams` ritorna gli spec MASTER del canale; `getConfig` legge e converte; `setConfig` valida (un valore fuori range → ValidationError, NON scrive) e su valori validi chiama `putParamset` una sola volta con i valori convertiti.
+- Commit: `feat(api): device configuration (MASTER paramset) sulla facade`.
+
 ## Gate finale Fase 3
 `npm run lint && npm run format:check && npm run typecheck && npm run test:cov && npm run build` verde, coverage ≥ 80%. Bump `package.json` a `0.1.0` (primo rilascio funzionale) in un commit dedicato a fine fase (NON pubblicare su npm senza ok utente).
 
