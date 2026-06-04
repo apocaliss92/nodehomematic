@@ -37,6 +37,14 @@ const PARAMSETS: Readonly<Record<string, Record<string, ParameterData>>> = {
   },
   'VCU1:1|MASTER': {
     CYCLIC_INFO_MSG_DIS: { TYPE: 'INTEGER', OPERATIONS: 1 | 2, FLAGS: 1, MIN: 0, MAX: 100 },
+    MODE: {
+      TYPE: 'ENUM',
+      OPERATIONS: 1 | 2,
+      FLAGS: 1,
+      VALUE_LIST: ['OFF', 'ON', 'AUTO'],
+      DEFAULT: 0,
+      UNIT: '',
+    },
   },
   'VCU1:0|MASTER': {},
   'VCU1|MASTER': {},
@@ -216,14 +224,17 @@ describe('Homematic facade', () => {
     );
   });
 
-  it('getConfigParams returns the MASTER specs', () => {
+  it('getConfigParams returns the MASTER specs (numeric + enum metadata)', () => {
     const params = hm.getConfigParams('VCU1:1');
-    expect(params).toHaveLength(1);
-    expect(params[0]).toMatchObject({
-      parameter: 'CYCLIC_INFO_MSG_DIS',
-      type: 'INTEGER',
-      min: 0,
-      max: 100,
+    expect(params).toHaveLength(2);
+    const numeric = params.find((p) => p.parameter === 'CYCLIC_INFO_MSG_DIS')!;
+    expect(numeric).toMatchObject({ type: 'INTEGER', min: 0, max: 100, writable: true });
+    const mode = params.find((p) => p.parameter === 'MODE')!;
+    expect(mode).toMatchObject({
+      type: 'ENUM',
+      valueList: ['OFF', 'ON', 'AUTO'],
+      default: 0,
+      unit: '',
       writable: true,
     });
   });
@@ -267,5 +278,89 @@ describe('Homematic facade', () => {
     });
     expect(ready).toBe(true);
     expect(conns).toEqual([{ interfaceId: INTERFACE_ID, state: 'CONNECTED' }]);
+  });
+
+  it('maps a systemError into a public error event', async () => {
+    const errors: Error[] = [];
+    hm.on('error', (e) => errors.push(e));
+    await central.eventBus.publish({
+      type: 'systemError',
+      interfaceId: INTERFACE_ID,
+      code: 7,
+      message: 'boom',
+    });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.message).toContain('boom');
+  });
+
+  it('deviceRemoved drops the device from the model and emits', async () => {
+    const removed: string[] = [];
+    hm.on('deviceRemoved', (e) => removed.push(e.device));
+    await central.eventBus.publish({ type: 'deviceRemoved', address: 'VCU1' });
+    expect(removed).toEqual(['VCU1']);
+    expect(hm.devices()).toHaveLength(0);
+  });
+
+  it('deviceAdded rebuilds the device from the registry and emits', async () => {
+    const added: string[] = [];
+    hm.on('deviceAdded', (e) => added.push(e.device));
+    // Re-publishing the same address re-indexes from the (still-populated) registry.
+    await central.eventBus.publish({ type: 'deviceAdded', address: 'VCU1' });
+    expect(added).toEqual(['VCU1']);
+    expect(hm.devices()).toHaveLength(1);
+  });
+
+  it('once fires a listener a single time; off removes it', async () => {
+    let onceCount = 0;
+    hm.once('valueChanged', () => {
+      onceCount += 1;
+    });
+    let offCount = 0;
+    const listener = (): void => {
+      offCount += 1;
+    };
+    hm.on('valueChanged', listener);
+    hm.off('valueChanged', listener);
+    await pushValue('STATE', true, 1000);
+    await pushValue('STATE', false, 1001);
+    expect(onceCount).toBe(1);
+    expect(offCount).toBe(0);
+  });
+
+  it('getValue throws for an unknown string dpId', () => {
+    expect(() => hm.getValue('no-such-id')).toThrow(ValidationError);
+  });
+
+  it('getValue throws for a structured ref to an unknown device', () => {
+    expect(() => hm.getValue({ device: 'NOPE', channel: 1, parameter: 'STATE' })).toThrow(
+      ValidationError,
+    );
+  });
+
+  it('getConfigParams throws for an unknown channel/device', () => {
+    expect(() => hm.getConfigParams('NOPE:1')).toThrow(ValidationError);
+  });
+
+  it('getConfig passes through raw values that have no MASTER spec', async () => {
+    stub.masterValues = {
+      CYCLIC_INFO_MSG_DIS: 30,
+      EXTRA_RAW: 'hello',
+      EXTRA_NULL: null,
+      EXTRA_OBJ: { nested: 1 },
+    };
+    const config = await hm.getConfig('VCU1:1');
+    expect(config['CYCLIC_INFO_MSG_DIS']).toBe(30);
+    expect(config['EXTRA_RAW']).toBe('hello');
+    expect(config['EXTRA_NULL']).toBeNull();
+    // A non-primitive raw value is JSON-encoded defensively.
+    expect(config['EXTRA_OBJ']).toBe('{"nested":1}');
+  });
+
+  it('stop is idempotent and start after stop re-subscribes', async () => {
+    await hm.stop();
+    expect(hm.devices()).toHaveLength(0);
+    await hm.stop(); // no-op
+    await hm.start();
+    expect(hm.devices()).toHaveLength(1);
   });
 });
