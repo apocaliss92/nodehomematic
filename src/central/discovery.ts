@@ -269,11 +269,17 @@ function buildDevice(
 /**
  * Fetch and merge device/room/function metadata over JSON-RPC.
  *
- * Assumed response shapes (FLAG: verify against real CCU):
- *  - `Device.listAllDetail` → array of `{ address, name, channels?: [{ address, name }] }`.
- *    We map both device-level and channel-level `address → name`.
- *  - `Room.getAll` → array of `{ name, channelIds: string[] }` (member channel
- *    addresses/ids). We map each member address → [roomName...].
+ * Real CCU response shapes (confirmed against hardware):
+ *  - `Device.listAllDetail` → array of
+ *    `{ id, name, address, interface, type, channels: [{ id, name, address, index, channelType, ... }] }`.
+ *    Device name is keyed by the device `address`; each channel has BOTH a
+ *    numeric `id` (string) and an `address` (e.g. `001B9D89A09163:0`). We map
+ *    both device- and channel-level `address → name`, and build a
+ *    `channelId → channelAddress` index used to resolve rooms/functions.
+ *  - `Room.getAll` → array of `{ id, name, description, channelIds: string[] }`
+ *    where `channelIds` are the numeric channel IDs (matching channel `id`),
+ *    NOT addresses. Each room name is attached to its member channels'
+ *    addresses AND their derived device addresses (union, deduped).
  *  - `Subsection.getAll` → same shape as rooms but represents "functions".
  */
 export async function mergeDetails(
@@ -283,22 +289,23 @@ export async function mergeDetails(
   const opts = sessionId !== undefined ? { sessionId } : undefined;
 
   const nameByAddress = new Map<string, string>();
+  const channelIdToAddress = new Map<string, string>();
   const roomsByAddress = new Map<string, string[]>();
   const functionsByAddress = new Map<string, string[]>();
 
   const detail = await safePost(jsonClient, JsonRpcMethod.DEVICE_LIST_ALL_DETAIL, opts);
   for (const item of asArray(detail)) {
-    parseDeviceDetail(item, nameByAddress);
+    parseDeviceDetail(item, nameByAddress, channelIdToAddress);
   }
 
   const rooms = await safePost(jsonClient, JsonRpcMethod.ROOM_GET_ALL, opts);
   for (const item of asArray(rooms)) {
-    parseGroup(item, roomsByAddress);
+    parseGroup(item, channelIdToAddress, roomsByAddress);
   }
 
   const subsections = await safePost(jsonClient, JsonRpcMethod.SUBSECTION_GET_ALL, opts);
   for (const item of asArray(subsections)) {
-    parseGroup(item, functionsByAddress);
+    parseGroup(item, channelIdToAddress, functionsByAddress);
   }
 
   return { nameByAddress, roomsByAddress, functionsByAddress };
@@ -317,41 +324,80 @@ async function safePost(
   }
 }
 
-/** Map a single `Device.listAllDetail` entry's device + channel names. */
-function parseDeviceDetail(item: unknown, into: Map<string, string>): void {
+/**
+ * Map a single `Device.listAllDetail` entry's device + channel names AND index
+ * every channel's numeric `id → address` so rooms/functions can join later.
+ */
+function parseDeviceDetail(
+  item: unknown,
+  nameByAddress: Map<string, string>,
+  channelIdToAddress: Map<string, string>,
+): void {
   const record = asRecord(item);
   if (record === undefined) return;
   const address = asString(record.address);
   const name = asString(record.name);
-  if (address !== undefined && name !== undefined) into.set(address, name);
+  if (address !== undefined && name !== undefined) nameByAddress.set(address, name);
 
   for (const channel of asArray(record.channels)) {
     const ch = asRecord(channel);
     if (ch === undefined) continue;
     const chAddress = asString(ch.address);
+    if (chAddress === undefined) continue;
     const chName = asString(ch.name);
-    if (chAddress !== undefined && chName !== undefined) into.set(chAddress, chName);
+    if (chName !== undefined) nameByAddress.set(chAddress, chName);
+    const chId = asString(ch.id);
+    if (chId !== undefined) channelIdToAddress.set(chId, chAddress);
   }
 }
 
+/** Derive a device address from a channel address by stripping the `:index` suffix. */
+function deviceAddressOf(channelAddress: string): string {
+  const colon = channelAddress.lastIndexOf(':');
+  return colon === -1 ? channelAddress : channelAddress.slice(0, colon);
+}
+
+/** Append `name` to `address`'s list in `into`, deduping. */
+function addGroupName(into: Map<string, string[]>, address: string, name: string): void {
+  const existing = into.get(address);
+  if (existing === undefined) into.set(address, [name]);
+  else if (!existing.includes(name)) existing.push(name);
+}
+
 /**
- * Map a single room/subsection entry: its `name` is appended to every member
- * channel id/address. Member ids are read from `channelIds` (preferred) falling
- * back to `channelAddresses`/`members` if present.
+ * Map a single room/subsection entry: its `name` is attached to every member
+ * channel's ADDRESS and its derived DEVICE address. Members are numeric channel
+ * `id`s in `channelIds`, resolved to addresses via `channelIdToAddress`; unknown
+ * ids are skipped (no bogus entry). `channelAddresses`/`members` are accepted as
+ * fallbacks and, when already address-shaped, used directly.
  */
-function parseGroup(item: unknown, into: Map<string, string[]>): void {
+function parseGroup(
+  item: unknown,
+  channelIdToAddress: Map<string, string>,
+  into: Map<string, string[]>,
+): void {
   const record = asRecord(item);
   if (record === undefined) return;
   const name = asString(record.name);
   if (name === undefined) return;
 
-  const members = firstArray(record.channelIds, record.channelAddresses, record.members);
-  for (const member of members) {
-    const address = asString(member);
-    if (address === undefined) continue;
-    const existing = into.get(address);
-    if (existing === undefined) into.set(address, [name]);
-    else if (!existing.includes(name)) existing.push(name);
+  const idMembers = asArray(record.channelIds);
+  for (const member of idMembers) {
+    const channelId = asString(member);
+    if (channelId === undefined) continue;
+    const channelAddress = channelIdToAddress.get(channelId);
+    if (channelAddress === undefined) continue; // unknown id → skip, no throw
+    addGroupName(into, channelAddress, name);
+    addGroupName(into, deviceAddressOf(channelAddress), name);
+  }
+
+  // Fallbacks for CCUs/responses that key members by address directly.
+  const addressMembers = firstArray(record.channelAddresses, record.members);
+  for (const member of addressMembers) {
+    const channelAddress = asString(member);
+    if (channelAddress === undefined) continue;
+    addGroupName(into, channelAddress, name);
+    addGroupName(into, deviceAddressOf(channelAddress), name);
   }
 }
 

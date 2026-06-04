@@ -195,20 +195,53 @@ describe('central/discovery discoverInterface', () => {
     expect(nodes[0].rooms).toEqual(['Hallway']);
     expect(nodes[0].functions).toEqual(['Security']);
   });
+
+  it('resolves rooms onto a DeviceNode via mergeDetails channelId join', async () => {
+    // DEVICE address is VCU0000001 with channel VCU0000001:1. Build details from
+    // real CCU shapes where Room.channelIds references the channel numeric id.
+    const client: DetailsJsonRpcClient = {
+      async post(method: string): Promise<unknown> {
+        if (method === 'Device.listAllDetail') {
+          return [
+            {
+              address: 'VCU0000001',
+              name: 'Front Door',
+              channels: [{ id: '10', address: 'VCU0000001:1', name: 'Contact' }],
+            },
+          ];
+        }
+        if (method === 'Room.getAll') return [{ id: '1', name: 'Kitchen', channelIds: ['10'] }];
+        if (method === 'Subsection.getAll')
+          return [{ id: '2', name: 'Security', channelIds: ['10'] }];
+        return null;
+      },
+    };
+    const details = await mergeDetails(client);
+
+    const nodes = await discoverInterface({ source, deviceCache, paramsetCache, details });
+    expect(nodes[0].name).toBe('Front Door');
+    expect(nodes[0].rooms).toContain('Kitchen');
+    expect(nodes[0].functions).toContain('Security');
+  });
 });
 
 describe('central/discovery mergeDetails', () => {
-  it('parses listAllDetail + rooms + subsections into maps', async () => {
+  it('parses listAllDetail + rooms + subsections via channelId→address join', async () => {
+    // REAL CCU shapes: Device.listAllDetail channels carry numeric `id` AND
+    // `address`; Room/Subsection `channelIds` reference those numeric ids.
     const responses: Record<string, unknown> = {
       'Device.listAllDetail': [
         {
-          address: 'VCU0000001',
+          id: '100',
+          address: 'ABC',
           name: 'Front Door',
-          channels: [{ address: 'VCU0000001:1', name: 'Contact' }],
+          interface: INTERFACE_ID,
+          type: 'HmIP-SWDO',
+          channels: [{ id: '10', address: 'ABC:1', name: 'Contact', index: 1 }],
         },
       ],
-      'Room.getAll': [{ name: 'Hallway', channelIds: ['VCU0000001:1'] }],
-      'Subsection.getAll': [{ name: 'Security', channelIds: ['VCU0000001:1'] }],
+      'Room.getAll': [{ id: '1', name: 'Kitchen', description: '', channelIds: ['10'] }],
+      'Subsection.getAll': [{ id: '2', name: 'Security', description: '', channelIds: ['10'] }],
     };
     const client: DetailsJsonRpcClient = {
       async post(method: string): Promise<unknown> {
@@ -217,10 +250,66 @@ describe('central/discovery mergeDetails', () => {
     };
 
     const details = await mergeDetails(client);
-    expect(details.nameByAddress.get('VCU0000001')).toBe('Front Door');
-    expect(details.nameByAddress.get('VCU0000001:1')).toBe('Contact');
-    expect(details.roomsByAddress.get('VCU0000001:1')).toEqual(['Hallway']);
-    expect(details.functionsByAddress.get('VCU0000001:1')).toEqual(['Security']);
+    // Names still work (no regression): device + channel addresses → names.
+    expect(details.nameByAddress.get('ABC')).toBe('Front Door');
+    expect(details.nameByAddress.get('ABC:1')).toBe('Contact');
+
+    // Rooms resolve to BOTH the channel address and the derived device address.
+    expect(details.roomsByAddress.get('ABC:1')).toContain('Kitchen');
+    expect(details.roomsByAddress.get('ABC')).toContain('Kitchen');
+
+    // Subsections → functions, same join.
+    expect(details.functionsByAddress.get('ABC:1')).toContain('Security');
+    expect(details.functionsByAddress.get('ABC')).toContain('Security');
+  });
+
+  it('unions multiple channels rooms onto the device address, deduped', async () => {
+    const responses: Record<string, unknown> = {
+      'Device.listAllDetail': [
+        {
+          address: 'DEV',
+          name: 'Multi',
+          channels: [
+            { id: '20', address: 'DEV:1', name: 'C1' },
+            { id: '21', address: 'DEV:2', name: 'C2' },
+          ],
+        },
+      ],
+      'Room.getAll': [
+        { id: '1', name: 'Kitchen', channelIds: ['20'] },
+        { id: '2', name: 'Living', channelIds: ['21'] },
+        { id: '3', name: 'Kitchen', channelIds: ['21'] }, // duplicate name on a 2nd channel
+      ],
+    };
+    const client: DetailsJsonRpcClient = {
+      async post(method: string): Promise<unknown> {
+        return responses[method] ?? null;
+      },
+    };
+
+    const details = await mergeDetails(client);
+    const devRooms = details.roomsByAddress.get('DEV') ?? [];
+    expect([...devRooms].sort()).toEqual(['Kitchen', 'Living']);
+    expect(details.roomsByAddress.get('DEV:1')).toEqual(['Kitchen']);
+    expect([...(details.roomsByAddress.get('DEV:2') ?? [])].sort()).toEqual(['Kitchen', 'Living']);
+  });
+
+  it('skips a room whose channelId is unknown without throwing or bogus entries', async () => {
+    const responses: Record<string, unknown> = {
+      'Device.listAllDetail': [
+        { address: 'ABC', name: 'Front Door', channels: [{ id: '10', address: 'ABC:1' }] },
+      ],
+      'Room.getAll': [{ id: '1', name: 'Ghost', channelIds: ['9999'] }],
+    };
+    const client: DetailsJsonRpcClient = {
+      async post(method: string): Promise<unknown> {
+        return responses[method] ?? null;
+      },
+    };
+
+    const details = await mergeDetails(client);
+    expect(details.roomsByAddress.size).toBe(0);
+    expect(details.roomsByAddress.get('ABC')).toBeUndefined();
   });
 
   it('does not throw when a field is missing in an entry', async () => {
