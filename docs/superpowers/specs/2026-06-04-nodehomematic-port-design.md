@@ -154,9 +154,15 @@ TDD, copertura 80%+, tre livelli.
 
 Ogni fase è un ciclo spec→plan→implementazione testato.
 
-## 9. Rischi e decisioni aperte
+## 9. Decisioni chiuse e rischi
 
 - **Quirk XML-RPC Homematic** (encoding ISO-8859-1, `system.multicall`, tipi numerici): mitigati dal confine `RpcProxy` con fallback a serializer custom.
-- **Licenza:** ereditare la licenza di aiohomematic per un porting (verificare e replicare i requisiti di attribuzione). *Da confermare in Fase 0.*
-- **Nome npm:** verificare disponibilità `nodehomematic` su npm in Fase 0.
-- **Reconnect/CCU restart:** la CCU può perdere la registrazione del callback a un riavvio; health-ping + re-`init` coprono il caso.
+- **Licenza:** ✅ **MIT** (stessa di aiohomematic). Si mantiene il copyright originale `Copyright (c) 2021-2026 SukramJ, Daniel Perna` e si aggiunge il copyright del porting (richiesto da MIT per la redistribuzione).
+- **Nome npm:** ✅ `nodehomematic` disponibile sul registry (verificato 2026-06-04).
+- **Reconnect/CCU restart — requisito rock-solid:** la riconnessione è un requisito di primo livello, non best-effort. La CCU perde la registrazione del callback a ogni riavvio/perdita di rete; il sistema deve:
+  - rilevare la caduta via **health-ping periodico** per interfaccia + assenza di eventi attesi;
+  - ri-eseguire `init(callbackUrl, interfaceId)` con **backoff esponenziale + jitter** finché non riprende;
+  - **re-sync** della discovery dopo il re-init (i device possono essere cambiati durante l'outage);
+  - emettere eventi `connection` di transizione stato così che l'app esterna sappia sempre lo stato reale;
+  - sopravvivere a riavvii prolungati della CCU senza intervento manuale e senza perdere lo stato in cache.
+  - Coperto da test integration dedicati (finto CCU che cade/riparte) oltre che e2e.
