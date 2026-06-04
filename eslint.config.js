@@ -18,7 +18,17 @@ export default tseslint.config(
     },
   },
   {
-    files: ['tests/**/*.ts', '*.config.ts', 'eslint.config.js'],
+    files: ['tests/**/*.ts'],
     ...tseslint.configs.disableTypeChecked,
+  },
+  {
+    files: ['*.config.ts', 'eslint.config.js'],
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+        project: ['./tsconfig.json', './tsconfig.node.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
   },
 );
