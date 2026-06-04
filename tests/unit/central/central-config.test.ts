@@ -111,6 +111,9 @@ describe('CentralUnit config surface', () => {
       timings: { connectionCheckMs: 60_000, valueRefreshMs: 60_000 },
       tcpProbe: () => Promise.resolve(true),
       recoverySleep: () => Promise.resolve(),
+      // This suite asserts the config-surface routing calls; disable start-time
+      // value seeding so it does not record extra getParamset(VALUES) calls.
+      fetchInitialValues: false,
     });
     await central.start();
   });

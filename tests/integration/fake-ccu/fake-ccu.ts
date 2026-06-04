@@ -252,6 +252,15 @@ export class FakeCcu {
     return this.values.get(valueKey(address, parameter));
   }
 
+  /**
+   * Pre-seed a stored value WITHOUT a CCU push, so a subsequent `getParamset` /
+   * `getValue` returns it. Used to assert the central seeds initial values at
+   * start (which reads paramsets) rather than waiting for an event.
+   */
+  public setStoredValue(address: string, parameter: string, value: XmlRpcValue): void {
+    this.values.set(valueKey(address, parameter), value);
+  }
+
   /** Number of `getParamsetDescription` calls served so far. */
   public get paramsetFetches(): number {
     return this.paramsetFetchCount;

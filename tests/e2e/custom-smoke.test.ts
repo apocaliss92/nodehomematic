@@ -45,34 +45,30 @@ describe.runIf(E2E)('custom-entity e2e smoke (real CCU)', () => {
     });
 
     try {
+      // Measure start() duration: it now seeds initial VALUES paramsets, so it
+      // does extra (bounded-parallel) getParamset calls before resolving.
+      const startedAt = Date.now();
       await hm.start();
+      const startMs = Date.now() - startedAt;
+      console.log(`[e2e] start() took ${startMs}ms (includes initial value seeding)`);
 
       const entities = hm.customEntities();
       const breakdown = countByKind(entities);
       console.log(`[e2e] custom entities: ${entities.length} total — ${JSON.stringify(breakdown)}`);
 
-      // Custom entities are VIEWS over the data points. Their values are filled
-      // by the CCU's asynchronous value pushes after init — the CCU pushes a
-      // parameter on change / cyclically, so a given setpoint may or may not
-      // arrive within a short window (READ-ONLY: we never write to populate it).
-      // Wait briefly so the diagnostic reflects whatever values do arrive.
-      const climateWithTarget = (): number =>
-        hm
-          .customEntities()
-          .filter((e): e is Extract<HmCustomEntity, { kind: 'climate' }> => e.kind === 'climate')
-          .filter((e) => typeof e.targetTemperature === 'number').length;
-      const deadline = Date.now() + 15_000;
-      while (climateWithTarget() === 0 && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 250));
-      }
-
+      // Values are now SEEDED at start() (no need to wait for async CCU pushes):
+      // the central reads each channel's VALUES paramset and routes them through
+      // the value cache. So immediately after start(), most/all climate entities
+      // should already report numeric temperatures. (READ-ONLY: no set issued.)
       const climates = hm
         .customEntities()
         .filter((e): e is Extract<HmCustomEntity, { kind: 'climate' }> => e.kind === 'climate');
       const withTarget = climates.filter((c) => typeof c.targetTemperature === 'number');
+      const withCurrent = climates.filter((c) => typeof c.currentTemperature === 'number');
       console.log(
-        `[e2e] climate entities: ${climates.length} recognised ` +
-          `(${withTarget.length} have a numeric target temperature so far)`,
+        `[e2e] climate entities: ${climates.length} recognised — ` +
+          `${withTarget.length} have a numeric targetTemperature, ` +
+          `${withCurrent.length} have a numeric currentTemperature (immediately after start, no push wait)`,
       );
 
       const sample = withTarget[0] ?? climates[0];

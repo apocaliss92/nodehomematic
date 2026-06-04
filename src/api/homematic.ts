@@ -262,6 +262,11 @@ export class Homematic {
       await this.#central.start();
       this.#rebuildModel(this.#central.registry.getAll());
       this.#subscribe();
+      // Initial values may have been seeded by the central during start(),
+      // before the facade built its model / subscribed. Backfill those data
+      // points from the central's value cache so devices() shows values
+      // immediately. Live pushes flow through the valueReceived subscription.
+      this.#backfillSeededValues();
     } catch (error: unknown) {
       // Roll back so a failed start does not wedge the facade: a subsequent
       // start() attempt is allowed (and will call central.start() again).
@@ -674,6 +679,19 @@ export class Homematic {
         handler: () => this.#emitter.emit('ready'),
       }),
     );
+  }
+
+  /**
+   * Apply any values the central has already cached (e.g. seeded at start before
+   * the facade subscribed) onto the freshly-built data points. Silent: this is a
+   * one-shot catch-up, not a live change, so it emits no `valueChanged`.
+   */
+  #backfillSeededValues(): void {
+    for (const dp of this.#dataPointsById.values()) {
+      const entry = this.#central.getValueEntry(dp.dpk);
+      if (entry === undefined) continue;
+      dp.applyCcuValue(entry.value, entry.at);
+    }
   }
 
   #onValueReceived(dpk: DataPointKey, value: unknown, receivedAt: number): void {
