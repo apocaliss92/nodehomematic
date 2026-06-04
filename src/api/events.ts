@@ -38,11 +38,11 @@ export interface ConnectionEvent {
 }
 
 /** The typed map of public events to their payloads. */
-export interface HomematicEventMap {
+export type HomematicEventMap = {
   valueChanged: ValueChangedEvent;
   deviceAdded: DeviceEvent;
   deviceRemoved: DeviceEvent;
   connection: ConnectionEvent;
   ready: void;
   error: Error;
-}
+};

@@ -52,3 +52,27 @@ export interface HmDevice {
 export type DataPointRef =
   | string
   | { readonly device: string; readonly channel: number | string; readonly parameter: string };
+
+/**
+ * A single device-configuration parameter (MASTER paramset), with the metadata
+ * a configuration UI needs to render a form field for it.
+ */
+export interface HmConfigParam {
+  readonly parameter: string;
+  readonly type: string;
+  readonly min?: number;
+  readonly max?: number;
+  readonly default?: HmValue;
+  readonly unit?: string;
+  readonly valueList?: readonly string[];
+  /** Raw CCU `FLAGS` bitmask. */
+  readonly flags: number;
+  /** True when `OPERATIONS & WRITE` is set. */
+  readonly writable: boolean;
+}
+
+/** The MASTER configuration parameters of a single channel. */
+export interface HmChannelConfig {
+  readonly channelAddress: string;
+  readonly params: HmConfigParam[];
+}
