@@ -48,6 +48,7 @@ import {
   type StorageBackend,
 } from './store/storage-backend.js';
 import { discoverInterface, mergeDetails, warmStart, type DeviceDetails } from './discovery.js';
+import { HubFetcher } from './hub/hub-fetcher.js';
 import type { DeviceNode } from './graph.js';
 import { ConnectionStateTracker } from './connection/connection-state.js';
 import { PingPongTracker } from './connection/ping-pong.js';
@@ -281,6 +282,27 @@ export class CentralUnit {
       return;
     }
     await runtime.client.setValue(dpk.channelAddress, dpk.parameter, value);
+  }
+
+  // --- hub surface (Phase 5) ------------------------------------------------
+
+  /**
+   * Build a {@link HubFetcher} bound to the central's JSON-RPC client and a lazy
+   * session-id getter, or `undefined` when no JSON-RPC client is available (no
+   * credentials → no WebUI access). INTERNAL: the facade uses it to expose the
+   * hub (system variables, programs, rooms/functions); it is not part of the
+   * published surface. The session id is read lazily through the
+   * {@link SessionManager} so it tracks renews; with an injected `jsonClient`
+   * (tests) there is no SessionManager and the getter yields `undefined`, which
+   * is fine for clients that do not require a session.
+   */
+  public getHubFetcher(): HubFetcher | undefined {
+    if (this.jsonClient === undefined) return undefined;
+    const client = this.jsonClient;
+    return new HubFetcher({
+      client,
+      getSessionId: () => this.session?.sessionId,
+    });
   }
 
   // --- config surface (Phase 3, Task 7) -------------------------------------
