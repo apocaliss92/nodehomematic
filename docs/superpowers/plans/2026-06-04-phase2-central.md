@@ -149,6 +149,9 @@ tests/
 ## Gate finale Fase 2
 `npm run lint && npm run format:check && npm run typecheck && npm run test:cov && npm run build` verde, coverage ≥ 80%. (e2e reale opzionale a fine fase, gated HM_E2E.)
 
+## Follow-up noto (post-e2e reale 2026-06-04)
+- **Stanze/funzioni:** su RaspberryMatic reale `Room.getAll`/`Subsection.getAll` restituiscono `channelIds: []` vuoti → la mappatura canale→stanza NON è esposta via questi metodi JSON-RPC. aiohomematic recupera stanze/funzioni via **script ReGa** (`ReGa.runScript`). I NOMI device/canale (`Device.listAllDetail`) funzionano (41/41 device nominati nell'e2e). TODO Fase 3: implementare il fetch stanze/funzioni via script ReGa. Il join channelId→address in `mergeDetails` resta come logica difensiva corretta per CCU che popolano channelIds.
+
 ## Self-review
 - Copertura spec §4 central: event bus (T2), cache persistente+value (T3), registry+graph (T4), discovery+warm start (T5), reconnect rock-solid+scheduler+ping/pong (T6), CentralUnit lifecycle+wiring+integration reconnect (T7), enums/dpk (T1). ✅
 - Il requisito "reconnect rock-solid" ha test di integrazione dedicato (FakeCcu drop/restart) oltre agli unit della stage machine. ✅
