@@ -14,4 +14,8 @@ describe('support/version', () => {
   it('rifiuta Node < 20', () => {
     expect(isSupportedNodeVersion('v18.20.0')).toBe(false);
   });
+
+  it('rifiuta stringhe non riconoscibili come versione', () => {
+    expect(isSupportedNodeVersion('not-a-version')).toBe(false);
+  });
 });
