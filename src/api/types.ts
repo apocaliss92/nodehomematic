@@ -76,3 +76,72 @@ export interface HmChannelConfig {
   readonly channelAddress: string;
   readonly params: HmConfigParam[];
 }
+
+// --- Custom entities (typed domain views over generic data points) ----------
+//
+// A custom entity aggregates several data points of one device into a typed
+// domain object (Climate / Switch / Light / Cover / Lock). These snapshot types
+// carry only plain, serialisable state — never functions; commands are issued
+// through the facade's ergonomic command methods (e.g. `climateSetTemperature`).
+
+/** A climate (thermostat / heating-group) snapshot. */
+export interface HmClimate {
+  readonly kind: 'climate';
+  /** Owning device address, e.g. `VCU0000001`. */
+  readonly device: string;
+  /** Primary channel address, e.g. `VCU0000001:1`. */
+  readonly channel: string;
+  readonly currentTemperature: number | null;
+  readonly targetTemperature: number | null;
+  readonly currentHumidity: number | null;
+  readonly minTemp: number;
+  readonly maxTemp: number;
+  readonly targetTemperatureStep: number;
+  readonly mode: 'auto' | 'heat' | 'off';
+  readonly preset: 'boost' | 'away' | 'week_program' | 'none';
+  readonly activity: 'heating' | 'idle' | 'off';
+}
+
+/** An on/off switch snapshot. */
+export interface HmSwitch {
+  readonly kind: 'switch';
+  readonly device: string;
+  readonly channel: string;
+  readonly isOn: boolean;
+}
+
+/** A dimmable light snapshot. */
+export interface HmLight {
+  readonly kind: 'light';
+  readonly device: string;
+  readonly channel: string;
+  readonly isOn: boolean;
+  /** Brightness 0..255, or `null` when unavailable. */
+  readonly brightness: number | null;
+}
+
+/** A cover/blind snapshot. */
+export interface HmCover {
+  readonly kind: 'cover' | 'blind';
+  readonly device: string;
+  readonly channel: string;
+  /** Position 0..100, or `null` when unavailable. */
+  readonly currentPosition: number | null;
+  readonly isClosed: boolean;
+  /** Slat tilt 0..100 (blinds only), or `null` when unavailable. */
+  readonly currentTiltPosition?: number | null;
+}
+
+/** A lock snapshot. */
+export interface HmLock {
+  readonly kind: 'lock';
+  readonly device: string;
+  readonly channel: string;
+  readonly isLocked: boolean;
+}
+
+/**
+ * A custom-entity snapshot — a discriminated union keyed by `kind`. An immutable
+ * view of the entity's current state; issue commands through the facade methods.
+ */
+export type HmCustomEntity = HmClimate | HmSwitch | HmLight | HmCover | HmLock;
