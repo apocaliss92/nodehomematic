@@ -30,7 +30,11 @@ import {
   serializeMethodCall,
   serializeMethodResponse,
 } from '../../../src/transport/xmlrpc/serialize.js';
-import type { DeviceDescription, XmlRpcValue } from '../../../src/transport/xmlrpc/types.js';
+import type {
+  DeviceDescription,
+  ParameterData,
+  XmlRpcValue,
+} from '../../../src/transport/xmlrpc/types.js';
 
 /** A JSON-RPC error envelope field. */
 interface JsonRpcError {
@@ -54,20 +58,74 @@ export interface RegistrationRecord {
 
 const SESSION_ID = 'SESSIONID123';
 
-/** Canned device descriptions returned by `listDevices`. */
+/**
+ * Canned device descriptions returned by `listDevices`: one device with a
+ * MAINTENANCE channel (`:0`) and a SHUTTER_CONTACT channel (`:1`) that exposes
+ * VALUES, MASTER and LINK paramsets. PARENT/CHILDREN are wired so the graph
+ * builder links them.
+ */
 const CANNED_DEVICES: readonly DeviceDescription[] = [
-  { ADDRESS: 'VCU0000001', TYPE: 'HmIP-SWDO', FIRMWARE: '1.0.0' },
-  { ADDRESS: 'VCU0000001:1', TYPE: 'SHUTTER_CONTACT', PARENT: 'VCU0000001' },
+  {
+    ADDRESS: 'VCU0000001',
+    TYPE: 'HmIP-SWDO',
+    FIRMWARE: '1.0.0',
+    PARAMSETS: ['MASTER'],
+    CHILDREN: ['VCU0000001:0', 'VCU0000001:1'],
+  },
+  {
+    ADDRESS: 'VCU0000001:0',
+    TYPE: 'MAINTENANCE',
+    PARENT: 'VCU0000001',
+    PARAMSETS: ['MASTER'],
+  },
+  {
+    ADDRESS: 'VCU0000001:1',
+    TYPE: 'SHUTTER_CONTACT',
+    PARENT: 'VCU0000001',
+    PARAMSETS: ['VALUES', 'MASTER', 'LINK'],
+    DIRECTION: 1,
+  },
 ];
+
+/** Operations bitmask shortcuts (READ=1, WRITE=2, EVENT=4). */
+const READ_WRITE_EVENT = 1 | 2 | 4;
+const READ_EVENT = 1 | 4;
+const READ_WRITE = 1 | 2;
+
+/** Canned paramset descriptions keyed by `${channelAddress}|${paramsetKey}`. */
+const CANNED_PARAMSETS: Readonly<Record<string, Record<string, ParameterData>>> = {
+  'VCU0000001:1|VALUES': {
+    STATE: { TYPE: 'BOOL', OPERATIONS: READ_WRITE_EVENT, FLAGS: 1 },
+    LEVEL: { TYPE: 'FLOAT', OPERATIONS: READ_EVENT, FLAGS: 1, MIN: 0, MAX: 1 },
+  },
+  'VCU0000001:1|MASTER': {
+    CYCLIC_INFO_MSG: { TYPE: 'BOOL', OPERATIONS: READ_WRITE, FLAGS: 1 },
+  },
+  'VCU0000001:0|MASTER': {
+    DUTY_CYCLE: { TYPE: 'BOOL', OPERATIONS: 1, FLAGS: 1 },
+  },
+  'VCU0000001|MASTER': {},
+};
 
 /** Canned detail list returned by `Device.listAllDetail`. */
 const CANNED_DEVICE_DETAIL: ReadonlyArray<Record<string, unknown>> = [
-  { id: '4711', address: 'VCU0000001', name: 'Window Contact', type: 'HmIP-SWDO' },
+  {
+    id: '4711',
+    address: 'VCU0000001',
+    name: 'Window Contact',
+    type: 'HmIP-SWDO',
+    channels: [{ address: 'VCU0000001:1', name: 'Window Contact Sensor' }],
+  },
 ];
 
 /** Canned room list returned by `Room.getAll`. */
 const CANNED_ROOMS: ReadonlyArray<Record<string, unknown>> = [
   { id: '1234', name: 'Living Room', channelIds: ['VCU0000001:1'] },
+];
+
+/** Canned function list returned by `Subsection.getAll`. */
+const CANNED_SUBSECTIONS: ReadonlyArray<Record<string, unknown>> = [
+  { id: '5678', name: 'Security', channelIds: ['VCU0000001:1'] },
 ];
 
 /** Supported XML-RPC method names, for `system.listMethods`. */
@@ -76,8 +134,11 @@ const XML_RPC_METHODS: readonly string[] = [
   'ping',
   'listDevices',
   'getDeviceDescription',
+  'getParamsetDescription',
   'getValue',
   'setValue',
+  'putParamset',
+  'getVersion',
   'system.listMethods',
 ];
 
@@ -93,6 +154,12 @@ export class FakeCcu {
   private deregistration: string | undefined;
   /** Stored channel/parameter values, keyed by `${address}|${parameter}`. */
   private readonly values = new Map<string, XmlRpcValue>();
+  /** When true, every XML-RPC request is refused (simulated outage). */
+  private down = false;
+  /** When true, `system.listMethods` faults (forces the getVersion fallback). */
+  private listMethodsFails = false;
+  /** Count of `getParamsetDescription` calls served (for warm-start assertions). */
+  private paramsetFetchCount = 0;
 
   public constructor(options: FakeCcuOptions = {}) {
     this.username = options.username ?? 'Admin';
@@ -159,6 +226,37 @@ export class FakeCcu {
     return this.values.get(valueKey(address, parameter));
   }
 
+  /** Number of `getParamsetDescription` calls served so far. */
+  public get paramsetFetches(): number {
+    return this.paramsetFetchCount;
+  }
+
+  /**
+   * Simulate a CCU outage: every XML-RPC request is refused (HTTP 500 / fault)
+   * and the callback registration is dropped, until {@link restore} is called.
+   */
+  public dropConnection(): void {
+    this.down = true;
+    this.registration = undefined;
+  }
+
+  /** Resume serving XML-RPC requests after a {@link dropConnection}. */
+  public restore(): void {
+    this.down = false;
+  }
+
+  /** Toggle whether `system.listMethods` faults (to exercise getVersion fallback). */
+  public setListMethodsFails(fails: boolean): void {
+    this.listMethodsFails = fails;
+  }
+
+  /** Drop, forget the registration, then restore — simulates a CCU restart. */
+  public restart(): void {
+    this.dropConnection();
+    this.deregistration = undefined;
+    this.restore();
+  }
+
   /**
    * Simulate a CCU push: POST an `event(interfaceId, channelAddress, parameter,
    * value)` XML-RPC methodCall to the currently registered callback URL.
@@ -174,6 +272,21 @@ export class FakeCcu {
       throw new Error('emitEvent called before a callback URL was registered via init()');
     }
     const body = serializeMethodCall('event', [reg.interfaceId, channelAddress, parameter, value]);
+    await postTo(reg.callbackUrl, body);
+  }
+
+  /**
+   * Simulate a CCU push of `newDevices(interfaceId, descriptions)` to the
+   * registered callback URL. Throws if no callback is registered.
+   */
+  public async emitNewDevices(
+    descriptions: ReadonlyArray<Record<string, XmlRpcValue>>,
+  ): Promise<void> {
+    const reg = this.registration;
+    if (reg === undefined) {
+      throw new Error('emitNewDevices called before a callback URL was registered via init()');
+    }
+    const body = serializeMethodCall('newDevices', [reg.interfaceId, [...descriptions]]);
     await postTo(reg.callbackUrl, body);
   }
 
@@ -198,6 +311,12 @@ export class FakeCcu {
   // --- XML-RPC interface endpoint -----------------------------------------
 
   private handleXmlRpc(body: Buffer, res: ServerResponse): void {
+    if (this.down) {
+      // Simulated outage: the socket still accepts (TCP up) but the RPC layer
+      // is unavailable. Mirrors a CCU mid-restart.
+      writeXml(res, serializeFault(-1, 'CCU unavailable'));
+      return;
+    }
     let methodName: string;
     let params: XmlRpcValue[];
     try {
@@ -233,11 +352,20 @@ export class FakeCcu {
         return CANNED_DEVICES as unknown as XmlRpcValue;
       case 'getDeviceDescription':
         return this.handleGetDeviceDescription(params);
+      case 'getParamsetDescription':
+        return this.handleGetParamsetDescription(params);
       case 'getValue':
         return this.handleGetValue(params);
       case 'setValue':
         return this.handleSetValue(params);
+      case 'putParamset':
+        return this.handlePutParamset(params);
+      case 'getVersion':
+        return '3.75.7';
       case 'system.listMethods':
+        if (this.listMethodsFails) {
+          throw new Error('listMethods unavailable');
+        }
         return [...XML_RPC_METHODS];
       default:
         throw new Error(`unknown XML-RPC method: ${method}`);
@@ -264,6 +392,29 @@ export class FakeCcu {
       throw new Error('unknown device');
     }
     return found as unknown as XmlRpcValue;
+  }
+
+  private handleGetParamsetDescription(params: readonly XmlRpcValue[]): XmlRpcValue {
+    const channelAddress = asString(params[0], 'getParamsetDescription channelAddress');
+    const paramsetKey = asString(params[1], 'getParamsetDescription paramsetKey');
+    this.paramsetFetchCount += 1;
+    const paramset = CANNED_PARAMSETS[`${channelAddress}|${paramsetKey}`];
+    if (paramset === undefined) {
+      // Unknown paramset → empty struct (defensive: discovery tolerates it).
+      return {} as XmlRpcValue;
+    }
+    return paramset as unknown as XmlRpcValue;
+  }
+
+  private handlePutParamset(params: readonly XmlRpcValue[]): XmlRpcValue {
+    const channelAddress = asString(params[0], 'putParamset channelAddress');
+    const values = params[2];
+    if (values !== null && typeof values === 'object' && !Array.isArray(values)) {
+      for (const [parameter, value] of Object.entries(values as Record<string, XmlRpcValue>)) {
+        this.values.set(valueKey(channelAddress, parameter), value);
+      }
+    }
+    return '';
   }
 
   private handleGetValue(params: readonly XmlRpcValue[]): XmlRpcValue {
@@ -321,6 +472,8 @@ export class FakeCcu {
         return { result: CANNED_DEVICE_DETAIL, error: null };
       case 'Room.getAll':
         return { result: CANNED_ROOMS, error: null };
+      case 'Subsection.getAll':
+        return { result: CANNED_SUBSECTIONS, error: null };
       default:
         return { result: null, error: { code: -32601, message: 'method not found' } };
     }
