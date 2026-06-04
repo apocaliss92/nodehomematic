@@ -310,6 +310,38 @@ describe('InterfaceClient', () => {
     expect(subject.state).toBe(ClientState.CONNECTED);
   });
 
+  it('costruisce la URL XML-RPC con il path (/groups) quando fornito', () => {
+    let capturedUrl: string | undefined;
+    const subject = new InterfaceClient({
+      centralName: 'MyCCU',
+      interface: Interface.VIRTUAL_DEVICES,
+      host: 'ccu.local',
+      path: '/groups',
+      callbackUrlProvider: (): string => 'http://callback:9000',
+      makeClient: (url): XmlRpcClientLike => {
+        capturedUrl = url;
+        return { call: (): Promise<XmlRpcValue> => Promise.resolve(true) };
+      },
+    });
+    expect(subject.interfaceId).toBe('MyCCU-VirtualDevices');
+    expect(capturedUrl).toBe('http://ccu.local:9292/groups');
+  });
+
+  it('senza path la URL XML-RPC termina con /', () => {
+    let capturedUrl: string | undefined;
+    new InterfaceClient({
+      centralName: 'MyCCU',
+      interface: Interface.HMIP_RF,
+      host: 'ccu.local',
+      callbackUrlProvider: (): string => 'http://callback:9000',
+      makeClient: (url): XmlRpcClientLike => {
+        capturedUrl = url;
+        return { call: (): Promise<XmlRpcValue> => Promise.resolve(true) };
+      },
+    });
+    expect(capturedUrl).toBe('http://ccu.local:2010/');
+  });
+
   it('getDeviceDescription concorrente sulla stessa address chiama il client una volta', async () => {
     let calls = 0;
     let resolveFn: ((v: XmlRpcValue) => void) | undefined;

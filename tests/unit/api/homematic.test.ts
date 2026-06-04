@@ -141,6 +141,28 @@ describe('Homematic facade', () => {
     await central.eventBus.publish({ type: 'valueReceived', dpk, value, receivedAt: at });
   }
 
+  it('accepts the VirtualDevices interface name at construction', () => {
+    expect(
+      () =>
+        new Homematic({
+          host: '127.0.0.1',
+          interfaces: ['VirtualDevices'],
+          callback: { host: '127.0.0.1', port: 0 },
+        }),
+    ).not.toThrow();
+  });
+
+  it('accepts a mixed interface list including VirtualDevices', () => {
+    expect(
+      () =>
+        new Homematic({
+          host: '127.0.0.1',
+          interfaces: ['HmIP-RF', 'BidCos-RF', 'VirtualDevices'],
+          callback: { host: '127.0.0.1', port: 0 },
+        }),
+    ).not.toThrow();
+  });
+
   it('rejects an unknown interface name at construction', () => {
     expect(
       () =>
