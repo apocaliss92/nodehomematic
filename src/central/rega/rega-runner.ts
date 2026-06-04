@@ -92,20 +92,15 @@ function substitute(body: string, params: Record<string, string | number>): stri
   return out;
 }
 
-/** Narrow an unknown JSON-RPC envelope to its `result` field. */
-function extractResult(envelope: unknown): unknown {
-  if (envelope !== null && typeof envelope === 'object' && 'result' in envelope) {
-    return envelope.result;
-  }
-  return undefined;
-}
-
 /**
  * Run a ReGa script body. Placeholders are substituted, the script is POSTed via
- * `ReGa.runScript`, and the textual result is sanitized + JSON-parsed. An
- * already-structured (object) result is returned unchanged.
+ * `ReGa.runScript`, and the returned value is interpreted as the script result:
+ * `JsonRpcClient.post` already unwraps the JSON-RPC envelope, so its return
+ * value is the script's `WriteLine`/`Write` output. A string result is
+ * sanitized (raw control chars stripped) and JSON-parsed; an already-structured
+ * (object) result is returned unchanged.
  *
- * @throws {ClientError} when the response carries no usable `result`.
+ * @throws {ClientError} when the response carries no usable result.
  */
 export async function runScript(
   client: RegaPostClient,
@@ -114,13 +109,12 @@ export async function runScript(
   params?: Record<string, string | number>,
 ): Promise<unknown> {
   const script = params ? substitute(body, params) : body;
-  const envelope = await client.post(
+  const result = await client.post(
     JsonRpcMethod.REGA_RUN_SCRIPT,
     { script },
     sessionId !== undefined ? { sessionId } : undefined,
   );
 
-  const result = extractResult(envelope);
   if (result === undefined || result === null) {
     throw new ClientError('ReGa.runScript returned no result');
   }

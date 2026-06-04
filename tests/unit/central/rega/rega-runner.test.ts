@@ -24,7 +24,7 @@ class FakeClient implements RegaPostClient {
     opts?: { sessionId?: string },
   ): Promise<unknown> {
     this.posts.push({ method, params, opts });
-    return { result: this.result };
+    return this.result;
   }
 }
 
@@ -104,7 +104,7 @@ describe('runScript', () => {
 
   it('throws a clear error when the result is missing', async () => {
     const client: RegaPostClient = {
-      post: async () => ({}),
+      post: async () => undefined,
     };
     await expect(runScript(client, 'sid', 'body')).rejects.toThrow(/result/i);
   });
