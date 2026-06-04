@@ -148,9 +148,17 @@ describe('parseXmlRpc — robustezza', () => {
     expect(() => parseXmlRpc('<html><body>oops</body></html>')).toThrow();
   });
 
-  it('accetta input come Buffer latin1 con accenti', () => {
-    const xml = resp('<string>café</string>');
-    const buf = Buffer.from(xml.replace('café', 'café'), 'latin1');
-    expect(parseXmlRpc(buf)).toBeDefined();
+  it('accetta input come Buffer latin1 con accenti e decodifica il valore', () => {
+    // Costruisci un vero buffer latin1: 'é' = byte 0xE9 (singolo byte in ISO-8859-1).
+    const head = Buffer.from(
+      '<?xml version="1.0" encoding="iso-8859-1"?><methodResponse><params><param><value><string>caf',
+      'latin1',
+    );
+    const accented = Buffer.from([0xe9]); // 'é' in latin1
+    const tail = Buffer.from('</string></value></param></params></methodResponse>', 'latin1');
+    const buf = Buffer.concat([head, accented, tail]);
+    const parsed = parseXmlRpc(buf);
+    expect(parsed.kind).toBe('response');
+    expect((parsed as { value: unknown }).value).toBe('café');
   });
 });

@@ -5,6 +5,7 @@ import {
   serializeFault,
   serializeValue,
 } from '../../../../src/transport/xmlrpc/serialize.js';
+import { ValidationError } from '../../../../src/support/errors.js';
 
 const decodeLatin1 = (buf: Buffer): string => new TextDecoder('latin1').decode(buf);
 
@@ -34,6 +35,15 @@ describe('serializeValue per tipo', () => {
   });
 
   it('float → <double>', () => {
+    expect(s(3.5)).toBe('<value><double>3.5</double></value>');
+  });
+
+  it('numero non-finito (NaN/Infinity) → ValidationError', () => {
+    expect(() => s(NaN)).toThrow(ValidationError);
+    expect(() => s(Infinity)).toThrow(ValidationError);
+    expect(() => s(-Infinity)).toThrow(ValidationError);
+    // i valori finiti continuano a serializzare come prima
+    expect(s(42)).toBe('<value><i4>42</i4></value>');
     expect(s(3.5)).toBe('<value><double>3.5</double></value>');
   });
 

@@ -6,7 +6,7 @@
 import { Agent, fetch, type RequestInit } from 'undici';
 import { ClientError, mapTransportError, mapXmlRpcFault } from '../../support/errors.js';
 import { serializeMethodCall } from './serialize.js';
-import { parseXmlRpc, EmptyBodyError } from './parse.js';
+import { parseXmlRpc } from './parse.js';
 import type { XmlRpcValue } from './types.js';
 
 /** HTTP Basic auth credentials. */
@@ -98,15 +98,9 @@ export class XmlRpcClient {
       throw new ClientError('XML-RPC response had an empty body');
     }
 
-    let parsed;
-    try {
-      parsed = parseXmlRpc(raw);
-    } catch (err) {
-      if (err instanceof EmptyBodyError) {
-        throw new ClientError('XML-RPC response had an empty body');
-      }
-      throw err;
-    }
+    // The empty-body case is already handled by the `raw.length === 0` guard
+    // above, so the parser can no longer throw EmptyBodyError here.
+    const parsed = parseXmlRpc(raw);
 
     if (parsed.kind === 'fault') {
       throw mapXmlRpcFault(parsed.fault.faultCode, parsed.fault.faultString);

@@ -11,6 +11,7 @@ import {
   InternalBackendError,
   CommandSupersededError,
   DescriptionNotFoundError,
+  TimeoutError,
   mapXmlRpcFault,
   mapJsonRpcError,
   mapTransportError,
@@ -136,6 +137,9 @@ describe('exceptionToFailureReason', () => {
     expect(exceptionToFailureReason(new CircuitBreakerOpenError())).toBe(
       FailureReason.CIRCUIT_BREAKER,
     );
+  });
+  it('TimeoutError → TIMEOUT', () => {
+    expect(exceptionToFailureReason(new TimeoutError())).toBe(FailureReason.TIMEOUT);
   });
   it('altro → UNKNOWN', () => {
     expect(exceptionToFailureReason(new Error('x'))).toBe(FailureReason.UNKNOWN);

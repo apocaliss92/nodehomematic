@@ -35,7 +35,15 @@ export const JSON_RPC_PATH = '/api/homematic.cgi';
 /** Outbound XML-RPC payloads are encoded as ISO-8859-1 (latin1). */
 export const ENCODING_OUT = 'iso-8859-1';
 
-/** Inbound callbacks from the CCU are UTF-8. */
+/**
+ * Encoding used ONLY to decode the request bodies received by the local
+ * callback HTTP server (the CCU POSTs its event/system notifications to us).
+ *
+ * This is NOT the encoding of XML-RPC RESPONSES we receive from the CCU: those
+ * are ISO-8859-1 as declared in their XML prolog and are decoded by the
+ * parser's declaration-sniffing (see `decodeInput` in `parse.ts`), NOT by this
+ * constant. Do not reuse this value to decode CCU responses.
+ */
 export const ENCODING_IN = 'utf-8';
 
 /** Default timeouts (milliseconds) for the various RPC operations. */

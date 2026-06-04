@@ -4,6 +4,7 @@
  * and the returned `Buffer` is latin1-encoded so accented characters travel as
  * single bytes.
  */
+import { ValidationError } from '../../support/errors.js';
 import type { XmlRpcValue } from './types.js';
 
 const XML_DECLARATION = '<?xml version="1.0" encoding="iso-8859-1"?>';
@@ -37,6 +38,9 @@ export function serializeValue(value: XmlRpcValue): string {
   }
 
   if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new ValidationError(`Cannot serialize non-finite number: ${String(value)}`);
+    }
     if (Number.isInteger(value)) return `<value><i4>${value}</i4></value>`;
     return `<value><double>${value}</double></value>`;
   }
