@@ -48,6 +48,17 @@ export interface FakeCcuOptions {
   readonly username?: string;
   /** Expected WebUI password for `Session.login`. Defaults to `'secret'`. */
   readonly password?: string;
+  /**
+   * Extra device descriptions appended to the canned set for this instance.
+   * Lets a test advertise additional devices (e.g. a switch that maps to a
+   * custom entity) WITHOUT changing the canned defaults other tests rely on.
+   */
+  readonly extraDevices?: readonly DeviceDescription[];
+  /**
+   * Extra paramset descriptions, keyed by `${channelAddress}|${paramsetKey}`,
+   * merged on top of the canned paramsets for this instance.
+   */
+  readonly extraParamsets?: Readonly<Record<string, Record<string, ParameterData>>>;
 }
 
 /** Records of a callback (de)registration the fake CCU has seen. */
@@ -169,10 +180,16 @@ export class FakeCcu {
   private listMethodsFails = false;
   /** Count of `getParamsetDescription` calls served (for warm-start assertions). */
   private paramsetFetchCount = 0;
+  /** Device descriptions served by `listDevices` (canned + any extras). */
+  private readonly devices: readonly DeviceDescription[];
+  /** Paramset descriptions (canned + any extras), keyed `${channel}|${key}`. */
+  private readonly paramsets: Readonly<Record<string, Record<string, ParameterData>>>;
 
   public constructor(options: FakeCcuOptions = {}) {
     this.username = options.username ?? 'Admin';
     this.password = options.password ?? 'secret';
+    this.devices = [...CANNED_DEVICES, ...(options.extraDevices ?? [])];
+    this.paramsets = { ...CANNED_PARAMSETS, ...(options.extraParamsets ?? {}) };
     this.httpServer = createServer((req, res) => {
       this.handleRequest(req, res);
     });
@@ -358,7 +375,7 @@ export class FakeCcu {
         // `pong` event to the callback — not needed for these tests.
         return true;
       case 'listDevices':
-        return CANNED_DEVICES as unknown as XmlRpcValue;
+        return this.devices as unknown as XmlRpcValue;
       case 'getDeviceDescription':
         return this.handleGetDeviceDescription(params);
       case 'getParamsetDescription':
@@ -397,7 +414,7 @@ export class FakeCcu {
 
   private handleGetDeviceDescription(params: readonly XmlRpcValue[]): XmlRpcValue {
     const address = asString(params[0], 'getDeviceDescription address');
-    const found = CANNED_DEVICES.find((d) => d.ADDRESS === address);
+    const found = this.devices.find((d) => d.ADDRESS === address);
     if (found === undefined) {
       // Mirror the CCU UNKNOWN_DEVICE fault.
       throw new Error('unknown device');
@@ -409,7 +426,7 @@ export class FakeCcu {
     const channelAddress = asString(params[0], 'getParamsetDescription channelAddress');
     const paramsetKey = asString(params[1], 'getParamsetDescription paramsetKey');
     this.paramsetFetchCount += 1;
-    const paramset = CANNED_PARAMSETS[`${channelAddress}|${paramsetKey}`];
+    const paramset = this.paramsets[`${channelAddress}|${paramsetKey}`];
     if (paramset === undefined) {
       // Unknown paramset → empty struct (defensive: discovery tolerates it).
       return {} as XmlRpcValue;
@@ -425,7 +442,7 @@ export class FakeCcu {
   private handleGetParamset(params: readonly XmlRpcValue[]): XmlRpcValue {
     const channelAddress = asString(params[0], 'getParamset channelAddress');
     const paramsetKey = asString(params[1], 'getParamset paramsetKey');
-    const description = CANNED_PARAMSETS[`${channelAddress}|${paramsetKey}`] ?? {};
+    const description = this.paramsets[`${channelAddress}|${paramsetKey}`] ?? {};
     const result: Record<string, XmlRpcValue> = {};
     for (const [parameter, data] of Object.entries(description)) {
       const stored = this.values.get(valueKey(channelAddress, parameter));

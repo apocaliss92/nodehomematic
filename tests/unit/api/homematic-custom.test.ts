@@ -43,6 +43,15 @@ const DEVICES: readonly DeviceDescription[] = [
   },
   { ADDRESS: 'SW1', TYPE: 'HmIP-PS', PARAMSETS: ['MASTER'], CHILDREN: ['SW1:3'] },
   { ADDRESS: 'SW1:3', TYPE: 'SWITCH_TRANSCEIVER', PARENT: 'SW1', PARAMSETS: ['VALUES'] },
+  // A flush-mount dimmer (HmIP-FDT, LEVEL on ch2 → light).
+  { ADDRESS: 'DIM1', TYPE: 'HmIP-FDT', PARAMSETS: ['MASTER'], CHILDREN: ['DIM1:2'] },
+  { ADDRESS: 'DIM1:2', TYPE: 'DIMMER_TRANSCEIVER', PARENT: 'DIM1', PARAMSETS: ['VALUES'] },
+  // A roller shutter (HmIP-BROLL, cover on ch4 → cover).
+  { ADDRESS: 'COV1', TYPE: 'HmIP-BROLL', PARAMSETS: ['MASTER'], CHILDREN: ['COV1:4'] },
+  { ADDRESS: 'COV1:4', TYPE: 'SHUTTER_TRANSCEIVER', PARENT: 'COV1', PARAMSETS: ['VALUES'] },
+  // A door-lock drive (HmIP-DLD, LOCK_* on ch1 → lock).
+  { ADDRESS: 'LCK1', TYPE: 'HmIP-DLD', PARAMSETS: ['MASTER'], CHILDREN: ['LCK1:1'] },
+  { ADDRESS: 'LCK1:1', TYPE: 'LOCK_TRANSCEIVER', PARENT: 'LCK1', PARAMSETS: ['VALUES'] },
 ];
 
 const PARAMSETS: Readonly<Record<string, Record<string, ParameterData>>> = {
@@ -68,8 +77,42 @@ const PARAMSETS: Readonly<Record<string, Record<string, ParameterData>>> = {
   'SW1:3|VALUES': {
     STATE: { TYPE: 'BOOL', OPERATIONS: READ_WRITE_EVENT, FLAGS: 1 },
   },
+  'DIM1:2|VALUES': {
+    LEVEL: { TYPE: 'FLOAT', OPERATIONS: READ_WRITE_EVENT, FLAGS: 1, MIN: 0, MAX: 1 },
+  },
+  'COV1:4|VALUES': {
+    LEVEL: { TYPE: 'FLOAT', OPERATIONS: READ_WRITE_EVENT, FLAGS: 1, MIN: 0, MAX: 1 },
+    // STOP/LOCK_TARGET_LEVEL are write-only ACTIONs on real HmIP firmware; the
+    // model only builds data points for readable/event params, so they are given
+    // the EVENT bit here so the command-routing path can be exercised. See the
+    // task report: pure write-only command fields are NOT modelled today.
+    STOP: { TYPE: 'ACTION', OPERATIONS: READ_WRITE_EVENT, FLAGS: 1 },
+    ACTIVITY_STATE: {
+      TYPE: 'ENUM',
+      OPERATIONS: 1 | 4,
+      FLAGS: 1,
+      VALUE_LIST: ['IDLE', 'UP', 'DOWN'],
+    },
+  },
+  'LCK1:1|VALUES': {
+    LOCK_STATE: {
+      TYPE: 'ENUM',
+      OPERATIONS: 1 | 4,
+      FLAGS: 1,
+      VALUE_LIST: ['UNKNOWN', 'LOCKED', 'UNLOCKED'],
+    },
+    LOCK_TARGET_LEVEL: {
+      TYPE: 'ENUM',
+      OPERATIONS: READ_WRITE_EVENT,
+      FLAGS: 1,
+      VALUE_LIST: ['LOCKED', 'UNLOCKED', 'OPEN'],
+    },
+  },
   'GRP1|MASTER': {},
   'SW1|MASTER': {},
+  'DIM1|MASTER': {},
+  'COV1|MASTER': {},
+  'LCK1|MASTER': {},
 };
 
 class StubClient {
@@ -228,6 +271,68 @@ describe('Homematic facade — custom entities', () => {
     expect(stub.setValueCalls).toEqual([
       { channel: 'GRP1:1', param: 'SET_POINT_TEMPERATURE', value: 30.5 },
     ]);
+  });
+
+  it('exposes light, cover and lock entities in the snapshot', async () => {
+    await push('DIM1:2', 'LEVEL', 0.5, 1100);
+    await push('COV1:4', 'LEVEL', 0.25, 1101);
+
+    const entities = hm.customEntities();
+    const light = entities.find((e) => e.kind === 'light');
+    const cover = entities.find((e) => e.kind === 'cover');
+    const lock = entities.find((e) => e.kind === 'lock');
+
+    expect(light).toMatchObject({ kind: 'light', device: 'DIM1', isOn: true });
+    expect(cover).toMatchObject({ kind: 'cover', device: 'COV1', currentPosition: 25 });
+    expect(lock).toMatchObject({ kind: 'lock', device: 'LCK1', isLocked: false });
+  });
+
+  it('lightTurnOn / lightSetBrightness / lightTurnOff route converted LEVEL writes', async () => {
+    await hm.lightTurnOn('DIM1', 2);
+    await hm.lightSetBrightness('DIM1', 2, 128);
+    await hm.lightTurnOff('DIM1', 2);
+    expect(stub.setValueCalls).toEqual([
+      { channel: 'DIM1:2', param: 'LEVEL', value: 1 },
+      { channel: 'DIM1:2', param: 'LEVEL', value: 128 / 255 },
+      { channel: 'DIM1:2', param: 'LEVEL', value: 0 },
+    ]);
+  });
+
+  it('lightTurnOn with explicit brightness routes the converted LEVEL', async () => {
+    await hm.lightTurnOn('DIM1', 2, 51);
+    expect(stub.setValueCalls).toEqual([{ channel: 'DIM1:2', param: 'LEVEL', value: 51 / 255 }]);
+  });
+
+  it('coverOpen / coverClose / coverStop / coverSetPosition route the right writes', async () => {
+    await hm.coverOpen('COV1', 4);
+    await hm.coverClose('COV1', 4);
+    await hm.coverStop('COV1', 4);
+    await hm.coverSetPosition('COV1', 4, 50);
+    expect(stub.setValueCalls).toEqual([
+      { channel: 'COV1:4', param: 'LEVEL', value: 1 },
+      { channel: 'COV1:4', param: 'LEVEL', value: 0 },
+      { channel: 'COV1:4', param: 'STOP', value: true },
+      { channel: 'COV1:4', param: 'LEVEL', value: 0.5 },
+    ]);
+  });
+
+  it('lockLock / lockUnlock / lockOpen route LOCK_TARGET_LEVEL writes', async () => {
+    await hm.lockLock('LCK1', 1);
+    await hm.lockUnlock('LCK1', 1);
+    await hm.lockOpen('LCK1', 1);
+    expect(stub.setValueCalls).toEqual([
+      { channel: 'LCK1:1', param: 'LOCK_TARGET_LEVEL', value: 'LOCKED' },
+      { channel: 'LCK1:1', param: 'LOCK_TARGET_LEVEL', value: 'UNLOCKED' },
+      { channel: 'LCK1:1', param: 'LOCK_TARGET_LEVEL', value: 'OPEN' },
+    ]);
+  });
+
+  it('a wrong-kind command throws ValidationError (light command on a switch)', async () => {
+    await expect(hm.lightTurnOn('SW1', 3)).rejects.toThrow(ValidationError);
+    await expect(hm.coverOpen('SW1', 3)).rejects.toThrow(ValidationError);
+    await expect(hm.lockLock('SW1', 3)).rejects.toThrow(ValidationError);
+    await expect(hm.switchTurnOn('GRP1', 1)).rejects.toThrow(ValidationError);
+    expect(stub.setValueCalls).toHaveLength(0);
   });
 
   it('rebuilds custom entities on deviceRemoved', async () => {
