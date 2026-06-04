@@ -46,6 +46,9 @@ export class CommandSupersededError extends BaseHomematicError {}
 /** A requested device/paramset description could not be found. */
 export class DescriptionNotFoundError extends BaseHomematicError {}
 
+/** An illegal connection state-machine transition was attempted. */
+export class InvalidStateTransitionError extends BaseHomematicError {}
+
 /** A request exceeded its allotted time budget. */
 export class TimeoutError extends BaseHomematicError {}
 

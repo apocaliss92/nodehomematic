@@ -11,6 +11,7 @@ import {
   InternalBackendError,
   CommandSupersededError,
   DescriptionNotFoundError,
+  InvalidStateTransitionError,
   TimeoutError,
   mapXmlRpcFault,
   mapJsonRpcError,
@@ -31,6 +32,7 @@ describe('support/errors taxonomy', () => {
     [InternalBackendError, 'InternalBackendError'],
     [CommandSupersededError, 'CommandSupersededError'],
     [DescriptionNotFoundError, 'DescriptionNotFoundError'],
+    [InvalidStateTransitionError, 'InvalidStateTransitionError'],
   ];
 
   for (const [Ctor, name] of cases) {
