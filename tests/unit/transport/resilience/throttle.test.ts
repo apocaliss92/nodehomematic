@@ -2,14 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { CommandThrottle, CommandPriority } from '../../../../src/transport/resilience/throttle.js';
 
 describe('CommandThrottle', () => {
-  it('con intervalMs=0 (default) esegue fn immediatamente', async () => {
+  it('with intervalMs=0 (default) runs fn immediately', async () => {
     const throttle = new CommandThrottle();
     const fn = vi.fn().mockResolvedValue('ok');
     await expect(throttle.run(fn)).resolves.toBe('ok');
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
-  it('con intervalMs=0 più comandi passano subito', async () => {
+  it('with intervalMs=0 multiple commands pass through immediately', async () => {
     const throttle = new CommandThrottle();
     const results = await Promise.all([
       throttle.run(() => Promise.resolve(1)),
@@ -19,13 +19,13 @@ describe('CommandThrottle', () => {
     expect(results).toEqual([1, 2, 3]);
   });
 
-  it('propaga gli errori di fn', async () => {
+  it('propagates fn errors', async () => {
     const throttle = new CommandThrottle();
     const err = new Error('nope');
     await expect(throttle.run(() => Promise.reject(err))).rejects.toBe(err);
   });
 
-  describe('con intervalMs>0 e timer fake', () => {
+  describe('with intervalMs>0 and fake timers', () => {
     beforeEach(() => {
       vi.useFakeTimers();
     });
@@ -33,7 +33,7 @@ describe('CommandThrottle', () => {
       vi.useRealTimers();
     });
 
-    it('CRITICAL bypassa il throttle ed esegue subito', async () => {
+    it('CRITICAL bypasses the throttle and runs immediately', async () => {
       const throttle = new CommandThrottle({ intervalMs: 1000 });
       const fn = vi.fn().mockResolvedValue('crit');
       const p = throttle.run(fn, CommandPriority.CRITICAL);
@@ -41,7 +41,7 @@ describe('CommandThrottle', () => {
       expect(fn).toHaveBeenCalledTimes(1);
     });
 
-    it('esegue i comandi in coda rispettando lordine di priorità', async () => {
+    it('runs the queued commands respecting the priority order', async () => {
       const throttle = new CommandThrottle({ intervalMs: 100 });
       const order: string[] = [];
       const lowP = throttle.run(async () => {
@@ -56,11 +56,11 @@ describe('CommandThrottle', () => {
       await vi.advanceTimersByTimeAsync(100);
       await Promise.all([lowP, highP]);
 
-      // HIGH deve precedere LOW nella coda a priorità.
+      // HIGH must precede LOW in the priority queue.
       expect(order).toEqual(['high', 'low']);
     });
 
-    it('serializza i comandi separandoli di intervalMs', async () => {
+    it('serializes the commands spacing them by intervalMs', async () => {
       const throttle = new CommandThrottle({ intervalMs: 100 });
       const fn = vi.fn().mockResolvedValue(undefined);
       const p1 = throttle.run(fn);

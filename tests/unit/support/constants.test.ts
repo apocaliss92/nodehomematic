@@ -23,51 +23,51 @@ import {
 } from '../../../src/support/constants.js';
 
 describe('support/constants', () => {
-  it('Interface enum espone le interfacce note', () => {
+  it('Interface enum exposes the known interfaces', () => {
     expect(Interface.BIDCOS_RF).toBe('BidCos-RF');
     expect(Interface.HMIP_RF).toBe('HmIP-RF');
     expect(Interface.BIDCOS_WIRED).toBe('BidCos-Wired');
     expect(Interface.VIRTUAL_DEVICES).toBe('VirtualDevices');
   });
 
-  it('INTERFACE_PORTS mappa nonTls/tls per ogni interfaccia', () => {
+  it('INTERFACE_PORTS maps nonTls/tls for each interface', () => {
     expect(INTERFACE_PORTS[Interface.BIDCOS_RF]).toEqual({ nonTls: 2001, tls: 42001 });
     expect(INTERFACE_PORTS[Interface.HMIP_RF]).toEqual({ nonTls: 2010, tls: 42010 });
     expect(INTERFACE_PORTS[Interface.BIDCOS_WIRED]).toEqual({ nonTls: 2000, tls: 42000 });
     expect(INTERFACE_PORTS[Interface.VIRTUAL_DEVICES]).toEqual({ nonTls: 9292, tls: 49292 });
   });
 
-  it('INTERFACE_REMOTE_PATH mappa /groups solo per VirtualDevices', () => {
+  it('INTERFACE_REMOTE_PATH maps /groups only for VirtualDevices', () => {
     expect(INTERFACE_REMOTE_PATH[Interface.VIRTUAL_DEVICES]).toBe('/groups');
     expect(INTERFACE_REMOTE_PATH[Interface.HMIP_RF]).toBeUndefined();
     expect(INTERFACE_REMOTE_PATH[Interface.BIDCOS_RF]).toBeUndefined();
     expect(INTERFACE_REMOTE_PATH[Interface.BIDCOS_WIRED]).toBeUndefined();
   });
 
-  it('path e encoding di protocollo', () => {
+  it('protocol path and encoding', () => {
     expect(JSON_RPC_PATH).toBe('/api/homematic.cgi');
     expect(ENCODING_OUT).toBe('iso-8859-1');
     expect(ENCODING_IN).toBe('utf-8');
   });
 
-  it('TIMEOUTS espone valori di default sensati', () => {
+  it('TIMEOUTS exposes sensible default values', () => {
     expect(TIMEOUTS.rpc).toBe(60000);
     expect(TIMEOUTS.ping).toBe(10000);
   });
 
-  it('interfaceId compone centralName-interface', () => {
+  it('interfaceId composes centralName-interface', () => {
     expect(interfaceId('MyCCU', Interface.HMIP_RF)).toBe('MyCCU-HmIP-RF');
   });
 
   describe('Operations bitmask + gating', () => {
-    it('valori', () => {
+    it('values', () => {
       expect(Operations.NONE).toBe(0);
       expect(Operations.READ).toBe(1);
       expect(Operations.WRITE).toBe(2);
       expect(Operations.EVENT).toBe(4);
     });
 
-    it('isReadable/isWritable/hasEvents leggono i bit', () => {
+    it('isReadable/isWritable/hasEvents read the bits', () => {
       const rw = Operations.READ | Operations.WRITE;
       expect(isReadable(rw)).toBe(true);
       expect(isWritable(rw)).toBe(true);
@@ -85,7 +85,7 @@ describe('support/constants', () => {
   });
 
   describe('Flag bitmask + gating', () => {
-    it('valori', () => {
+    it('values', () => {
       expect(Flag.VISIBLE).toBe(1);
       expect(Flag.INTERNAL).toBe(2);
       expect(Flag.TRANSFORM).toBe(4);
@@ -93,7 +93,7 @@ describe('support/constants', () => {
       expect(Flag.STICKY).toBe(0x10);
     });
 
-    it('isVisible/isService leggono i bit', () => {
+    it('isVisible/isService read the bits', () => {
       expect(isVisible(Flag.VISIBLE)).toBe(true);
       expect(isVisible(Flag.INTERNAL)).toBe(false);
       expect(isService(Flag.SERVICE | Flag.VISIBLE)).toBe(true);

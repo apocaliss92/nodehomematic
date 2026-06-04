@@ -36,7 +36,7 @@ describe('support/errors taxonomy', () => {
   ];
 
   for (const [Ctor, name] of cases) {
-    it(`${name} estende BaseHomematicError e ha name corretto`, () => {
+    it(`${name} extends BaseHomematicError and has the correct name`, () => {
       const err = new Ctor('boom');
       expect(err).toBeInstanceOf(BaseHomematicError);
       expect(err).toBeInstanceOf(Error);
@@ -45,14 +45,14 @@ describe('support/errors taxonomy', () => {
     });
   }
 
-  it('BaseHomematicError preserva la stack e instanceof', () => {
+  it('BaseHomematicError preserves the stack and instanceof', () => {
     const err = new ClientError('x');
     expect(err.stack).toBeDefined();
     expect(err instanceof ClientError).toBe(true);
   });
 });
 
-describe('mapXmlRpcFault (per stringa)', () => {
+describe('mapXmlRpcFault (by string)', () => {
   it('"unauthorized" → AuthFailureError', () => {
     const err = mapXmlRpcFault(-1, 'Unauthorized access');
     expect(err).toBeInstanceOf(AuthFailureError);
@@ -63,7 +63,7 @@ describe('mapXmlRpcFault (per stringa)', () => {
     expect(err).toBeInstanceOf(InternalBackendError);
   });
 
-  it('altro → ClientError, riportando code e faultString', () => {
+  it('other → ClientError, reporting code and faultString', () => {
     const err = mapXmlRpcFault(0, 'weird');
     expect(err).toBeInstanceOf(ClientError);
     expect(err.message).toContain('weird');
@@ -71,7 +71,7 @@ describe('mapXmlRpcFault (per stringa)', () => {
   });
 });
 
-describe('mapJsonRpcError (per contenuto messaggio / code)', () => {
+describe('mapJsonRpcError (by message content / code)', () => {
   it('code -32001 → AuthFailureError', () => {
     expect(mapJsonRpcError({ code: -32001, message: 'nope' })).toBeInstanceOf(AuthFailureError);
   });
@@ -100,13 +100,13 @@ describe('mapJsonRpcError (per contenuto messaggio / code)', () => {
     );
   });
 
-  it('altro → ClientError', () => {
+  it('other → ClientError', () => {
     expect(mapJsonRpcError({ code: 42, message: 'something' })).toBeInstanceOf(ClientError);
   });
 });
 
 describe('mapTransportError', () => {
-  it('errore OSError-like (ECONNREFUSED) → NoConnectionError', () => {
+  it('OSError-like error (ECONNREFUSED) → NoConnectionError', () => {
     const e = Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
     expect(mapTransportError(e)).toBeInstanceOf(NoConnectionError);
   });
@@ -116,11 +116,11 @@ describe('mapTransportError', () => {
     expect(mapTransportError(e)).toBeInstanceOf(NoConnectionError);
   });
 
-  it('errore generico → ClientError', () => {
+  it('generic error → ClientError', () => {
     expect(mapTransportError(new Error('whatever'))).toBeInstanceOf(ClientError);
   });
 
-  it('valore non-Error → ClientError', () => {
+  it('non-Error value → ClientError', () => {
     expect(mapTransportError('nope')).toBeInstanceOf(ClientError);
   });
 });
@@ -143,7 +143,7 @@ describe('exceptionToFailureReason', () => {
   it('TimeoutError → TIMEOUT', () => {
     expect(exceptionToFailureReason(new TimeoutError())).toBe(FailureReason.TIMEOUT);
   });
-  it('altro → UNKNOWN', () => {
+  it('other → UNKNOWN', () => {
     expect(exceptionToFailureReason(new Error('x'))).toBe(FailureReason.UNKNOWN);
   });
 });

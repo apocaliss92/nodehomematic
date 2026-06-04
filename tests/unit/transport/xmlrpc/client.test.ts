@@ -41,7 +41,7 @@ const faultXml = (code: number, str: string): string =>
   `</struct></value></fault></methodResponse>`;
 
 describe('XmlRpcClient.call', () => {
-  it('POST con Content-Type text/xml e ritorna il valore parseato', async () => {
+  it('POSTs with Content-Type text/xml and returns the parsed value', async () => {
     let seenContentType: string | undefined;
     let seenBody = '';
     const url = await startServer((req, res, body) => {
@@ -57,7 +57,7 @@ describe('XmlRpcClient.call', () => {
     expect(seenBody).toContain('<methodName>getValue</methodName>');
   });
 
-  it('invia Basic auth quando configurato', async () => {
+  it('sends Basic auth when configured', async () => {
     let auth: string | undefined;
     const url = await startServer((req, res) => {
       auth = req.headers['authorization'];
@@ -93,7 +93,7 @@ describe('XmlRpcClient.call', () => {
     await expect(client.call('getValue', [])).rejects.toBeInstanceOf(InternalBackendError);
   });
 
-  it('body vuoto (HTTP 200) → ClientError', async () => {
+  it('empty body (HTTP 200) → ClientError', async () => {
     const url = await startServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/xml' });
       res.end('');
@@ -102,7 +102,7 @@ describe('XmlRpcClient.call', () => {
     await expect(client.call('listDevices', [])).rejects.toBeInstanceOf(ClientError);
   });
 
-  it('connessione rifiutata → NoConnectionError', async () => {
+  it('connection refused → NoConnectionError', async () => {
     // Bind a server to obtain a real port, then close it so the port refuses.
     const url = await startServer(() => {});
     await new Promise<void>((resolve) => server!.close(() => resolve()));
@@ -119,7 +119,7 @@ describe('XmlRpcClient.call', () => {
     await expect(client.call('listDevices', [])).rejects.toBeInstanceOf(NoConnectionError);
   });
 
-  it('decodifica correttamente una risposta con accenti latin1', async () => {
+  it('correctly decodes a response with latin1 accents', async () => {
     const url = await startServer((req, res) => {
       const xml = responseXml('<string>café</string>');
       res.writeHead(200, { 'Content-Type': 'text/xml' });
@@ -130,7 +130,7 @@ describe('XmlRpcClient.call', () => {
     expect(result).toBe('café');
   });
 
-  it('risposta che è un methodCall → ClientError', async () => {
+  it('response that is a methodCall → ClientError', async () => {
     const url = await startServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/xml' });
       res.end('<methodCall><methodName>oops</methodName></methodCall>');
@@ -139,14 +139,14 @@ describe('XmlRpcClient.call', () => {
     await expect(client.call('getValue', [])).rejects.toBeInstanceOf(ClientError);
   });
 
-  it('close() con TLS dispatcher è idempotente e non lancia', async () => {
+  it('close() with a TLS dispatcher is idempotent and does not throw', async () => {
     const tlsClient = new XmlRpcClient({
       url: 'https://127.0.0.1:1/',
       tls: { rejectUnauthorized: false },
       timeoutMs: 1000,
     });
     await expect(tlsClient.close()).resolves.toBeUndefined();
-    // Client senza dispatcher: close è comunque sicuro.
+    // Client without a dispatcher: close is still safe.
     const plain = new XmlRpcClient({ url: 'http://127.0.0.1:1/', timeoutMs: 1000 });
     await expect(plain.close()).resolves.toBeUndefined();
   });

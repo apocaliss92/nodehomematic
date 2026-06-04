@@ -10,7 +10,7 @@ import { ValidationError } from '../../../../src/support/errors.js';
 const decodeLatin1 = (buf: Buffer): string => new TextDecoder('latin1').decode(buf);
 
 describe('serializeMethodCall', () => {
-  it('produce un methodCall con methodName e params posizionali', () => {
+  it('produces a methodCall with methodName and positional params', () => {
     const xml = decodeLatin1(serializeMethodCall('getValue', ['VCU001:1', 'STATE']));
     expect(xml).toContain('<?xml version="1.0" encoding="iso-8859-1"?>');
     expect(xml).toContain('<methodCall>');
@@ -20,13 +20,13 @@ describe('serializeMethodCall', () => {
     expect(xml).toMatch(/<param><value><string>STATE<\/string><\/value><\/param>/);
   });
 
-  it('emette params vuoto quando non ci sono argomenti', () => {
+  it('emits empty params when there are no arguments', () => {
     const xml = decodeLatin1(serializeMethodCall('listDevices', []));
     expect(xml).toContain('<params></params>');
   });
 });
 
-describe('serializeValue per tipo', () => {
+describe('serializeValue by type', () => {
   const s = (v: Parameters<typeof serializeValue>[0]): string => serializeValue(v);
 
   it('int → <i4>', () => {
@@ -38,21 +38,21 @@ describe('serializeValue per tipo', () => {
     expect(s(3.5)).toBe('<value><double>3.5</double></value>');
   });
 
-  it('numero non-finito (NaN/Infinity) → ValidationError', () => {
+  it('non-finite number (NaN/Infinity) → ValidationError', () => {
     expect(() => s(NaN)).toThrow(ValidationError);
     expect(() => s(Infinity)).toThrow(ValidationError);
     expect(() => s(-Infinity)).toThrow(ValidationError);
-    // i valori finiti continuano a serializzare come prima
+    // finite values keep serializing as before
     expect(s(42)).toBe('<value><i4>42</i4></value>');
     expect(s(3.5)).toBe('<value><double>3.5</double></value>');
   });
 
-  it('bool → <boolean> con 1/0', () => {
+  it('bool → <boolean> with 1/0', () => {
     expect(s(true)).toBe('<value><boolean>1</boolean></value>');
     expect(s(false)).toBe('<value><boolean>0</boolean></value>');
   });
 
-  it('string → <string> con escaping di & < >', () => {
+  it('string → <string> with escaping of & < >', () => {
     expect(s('a & b < c > d')).toBe('<value><string>a &amp; b &lt; c &gt; d</string></value>');
   });
 
@@ -85,8 +85,8 @@ describe('serializeValue per tipo', () => {
   });
 });
 
-describe('encoding ISO-8859-1', () => {
-  it('codifica i caratteri accentati in latin1 sul filo', () => {
+describe('ISO-8859-1 encoding', () => {
+  it('encodes accented characters as latin1 on the wire', () => {
     const bytes = serializeMethodCall('setValue', ['Wohnzimmer Tür', 'café']);
     // ü = 0xFC, é = 0xE9 in latin1 (single byte each)
     expect(bytes.includes(0xfc)).toBe(true);
@@ -99,12 +99,12 @@ describe('encoding ISO-8859-1', () => {
 });
 
 describe('serializeMethodResponse / serializeFault', () => {
-  it('methodResponse incapsula un singolo valore', () => {
+  it('methodResponse wraps a single value', () => {
     const xml = decodeLatin1(serializeMethodResponse(true));
     expect(xml).toContain('<methodResponse><params><param><value><boolean>1</boolean></value>');
   });
 
-  it('fault serializza faultCode/faultString', () => {
+  it('fault serializes faultCode/faultString', () => {
     const xml = decodeLatin1(serializeFault(-32601, 'method not found'));
     expect(xml).toContain('<methodResponse><fault><value><struct>');
     expect(xml).toContain('<name>faultCode</name><value><i4>-32601</i4></value>');

@@ -7,15 +7,15 @@ import {
 import { InvalidStateTransitionError } from '../../../../src/support/errors.js';
 
 describe('ConnectionStateMachine', () => {
-  it('parte in CREATED di default', () => {
+  it('starts in CREATED by default', () => {
     expect(new ConnectionStateMachine().state).toBe(ClientState.CREATED);
   });
 
-  it('accetta uno stato iniziale custom', () => {
+  it('accepts a custom initial state', () => {
     expect(new ConnectionStateMachine(ClientState.CONNECTED).state).toBe(ClientState.CONNECTED);
   });
 
-  it('una transizione valida aggiorna lo stato e notifica onChange', () => {
+  it('a valid transition updates the state and notifies onChange', () => {
     const sm = new ConnectionStateMachine();
     const events: Array<{ from: ClientState; to: ClientState; reason?: string }> = [];
     sm.onChange((e) => events.push(e));
@@ -27,20 +27,20 @@ describe('ConnectionStateMachine', () => {
     ]);
   });
 
-  it('una transizione invalida lancia e non cambia stato', () => {
+  it('an invalid transition throws and does not change state', () => {
     const sm = new ConnectionStateMachine();
     expect(() => sm.transitionTo(ClientState.CONNECTED)).toThrow(InvalidStateTransitionError);
     expect(sm.state).toBe(ClientState.CREATED);
   });
 
-  it('traccia failureReason entrando in FAILED', () => {
+  it('tracks failureReason when entering FAILED', () => {
     const sm = new ConnectionStateMachine(ClientState.INITIALIZING);
     sm.transitionTo(ClientState.FAILED, 'auth blew up');
     expect(sm.state).toBe(ClientState.FAILED);
     expect(sm.failureReason).toBe('auth blew up');
   });
 
-  it('onChange ritorna un unsubscribe funzionante', () => {
+  it('onChange returns a working unsubscribe', () => {
     const sm = new ConnectionStateMachine();
     const cb = vi.fn();
     const off = sm.onChange(cb);
@@ -51,7 +51,7 @@ describe('ConnectionStateMachine', () => {
     expect(cb).toHaveBeenCalledTimes(1);
   });
 
-  it('VALID_TRANSITIONS rispetta la tabella di protocollo', () => {
+  it('VALID_TRANSITIONS matches the protocol table', () => {
     expect(VALID_TRANSITIONS[ClientState.CREATED]).toEqual([ClientState.INITIALIZING]);
     expect(VALID_TRANSITIONS[ClientState.STOPPED]).toEqual([]);
     expect(VALID_TRANSITIONS[ClientState.CONNECTED]).toEqual(
@@ -63,7 +63,7 @@ describe('ConnectionStateMachine', () => {
     );
   });
 
-  it('un percorso completo connect/disconnect/reconnect è valido', () => {
+  it('a full connect/disconnect/reconnect path is valid', () => {
     const sm = new ConnectionStateMachine();
     sm.transitionTo(ClientState.INITIALIZING);
     sm.transitionTo(ClientState.INITIALIZED);
@@ -81,14 +81,14 @@ describe('ConnectionStateMachine', () => {
       expect(new ConnectionStateMachine().reconnectDelay(0)).toBe(2000);
     });
 
-    it('cresce esponenzialmente', () => {
+    it('grows exponentially', () => {
       const sm = new ConnectionStateMachine();
       expect(sm.reconnectDelay(1)).toBe(4000);
       expect(sm.reconnectDelay(2)).toBe(8000);
       expect(sm.reconnectDelay(3)).toBe(16000);
     });
 
-    it('è limitato a 120000', () => {
+    it('is capped at 120000', () => {
       const sm = new ConnectionStateMachine();
       expect(sm.reconnectDelay(20)).toBe(120000);
     });

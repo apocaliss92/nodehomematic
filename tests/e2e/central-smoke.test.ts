@@ -1,11 +1,11 @@
 /**
- * E2E smoke della Fase 2 (CentralUnit) contro una CCU3/RaspberryMatic REALE.
+ * Phase 2 (CentralUnit) E2E smoke against a REAL CCU3/RaspberryMatic.
  *
- * Read-only: start → discovery completa di HmIP-RF → verifica registry/nomi →
- * breve attesa di eventi valore → stop. NESSUN setValue (non modifica i device).
+ * Read-only: start → full HmIP-RF discovery → verify registry/names →
+ * brief wait for value events → stop. NO setValue (does not modify the devices).
  *
- * Gated da HM_E2E=1. Eseguire con: npm run test:e2e
- * (la discovery completa può richiedere decine di secondi su CCU con molti canali).
+ * Gated by HM_E2E=1. Run with: npm run test:e2e
+ * (full discovery may take tens of seconds on a CCU with many channels).
  */
 import { describe, it, expect } from 'vitest';
 
@@ -23,8 +23,8 @@ const tls = process.env.HM_TLS === 'true';
 const callbackHost = process.env.HM_CALLBACK_HOST ?? '0.0.0.0';
 const callbackPort = Number(process.env.HM_CALLBACK_PORT ?? '9123');
 
-describe.runIf(E2E)('central e2e smoke (CCU reale)', () => {
-  it('start → discovery → registry/nomi → eventi → stop', async () => {
+describe.runIf(E2E)('central e2e smoke (real CCU)', () => {
+  it('start → discovery → registry/names → events → stop', async () => {
     const valueEvents: CentralEvent[] = [];
     const central = new CentralUnit({
       centralName: 'nodehomematic-e2e',
@@ -60,19 +60,19 @@ describe.runIf(E2E)('central e2e smoke (CCU reale)', () => {
       const totalChannels = devices.reduce((acc, d) => acc + d.channels.length, 0);
 
       console.log(
-        `[e2e] discovery HmIP-RF → ${devices.length} device, ${totalChannels} canali, ` +
-          `${named.length} con nome, ${withRooms.length} con stanza`,
+        `[e2e] discovery HmIP-RF → ${devices.length} devices, ${totalChannels} channels, ` +
+          `${named.length} named, ${withRooms.length} with a room`,
       );
       if (named[0]) {
-        console.log(`[e2e] esempio device: ${named[0].address} "${named[0].name ?? ''}"`);
+        console.log(`[e2e] example device: ${named[0].address} "${named[0].name ?? ''}"`);
       }
 
       expect(ready).toBe(true);
       expect(devices.length).toBeGreaterThan(0);
-      // i nomi vengono dal merge JSON-RPC (Device.listAllDetail): se >0, le shape sono corrette
+      // the names come from the JSON-RPC merge (Device.listAllDetail): if >0, the shapes are correct
       expect(named.length).toBeGreaterThan(0);
 
-      // breve finestra per eventi valore spontanei
+      // brief window for spontaneous value events
       await new Promise((r) => setTimeout(r, 5_000));
       console.log(`[e2e] valueReceived in 5s: ${valueEvents.length}`);
     } finally {

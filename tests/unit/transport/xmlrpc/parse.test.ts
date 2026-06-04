@@ -15,7 +15,7 @@ function expectResponse(xml: string): XmlRpcValue {
   return parsed.value;
 }
 
-describe('parseXmlRpc — methodResponse values per tipo', () => {
+describe('parseXmlRpc — methodResponse values by type', () => {
   it('i4 / int / i8 → number', () => {
     expect(expectResponse(resp('<i4>42</i4>'))).toBe(42);
     expect(expectResponse(resp('<int>7</int>'))).toBe(7);
@@ -35,15 +35,15 @@ describe('parseXmlRpc — methodResponse values per tipo', () => {
     expect(expectResponse(resp('<string>hi</string>'))).toBe('hi');
   });
 
-  it('string con entità decodificate', () => {
+  it('string with decoded entities', () => {
     expect(expectResponse(resp('<string>a &amp; b &lt; c</string>'))).toBe('a & b < c');
   });
 
-  it('value senza type tag → string', () => {
+  it('value without a type tag → string', () => {
     expect(expectResponse(resp('plain text'))).toBe('plain text');
   });
 
-  it('value vuoto senza tag → stringa vuota', () => {
+  it('empty value without a tag → empty string', () => {
     expect(expectResponse(resp(''))).toBe('');
   });
 
@@ -70,7 +70,7 @@ describe('parseXmlRpc — methodResponse values per tipo', () => {
     expect(expectResponse(xml)).toEqual([1, 'x']);
   });
 
-  it('array vuoto → []', () => {
+  it('empty array → []', () => {
     expect(expectResponse(resp('<array><data></data></array>'))).toEqual([]);
   });
 
@@ -84,12 +84,12 @@ describe('parseXmlRpc — methodResponse values per tipo', () => {
     expect(expectResponse(xml)).toEqual({ ON: true, LEVEL: 0.5 });
   });
 
-  it('struct con un solo membro', () => {
+  it('struct with a single member', () => {
     const xml = resp('<struct><member><name>A</name><value><i4>1</i4></value></member></struct>');
     expect(expectResponse(xml)).toEqual({ A: 1 });
   });
 
-  it('struct annidato in array (listDevices-like)', () => {
+  it('struct nested in an array (listDevices-like)', () => {
     const xml = resp(
       '<array><data>' +
         '<value><struct><member><name>ADDRESS</name><value><string>VCU001</string></value></member></struct></value>' +
@@ -100,7 +100,7 @@ describe('parseXmlRpc — methodResponse values per tipo', () => {
 });
 
 describe('parseXmlRpc — fault', () => {
-  it('ritorna {faultCode, faultString}', () => {
+  it('returns {faultCode, faultString}', () => {
     const xml =
       '<?xml version="1.0"?><methodResponse><fault><value><struct>' +
       '<member><name>faultCode</name><value><i4>-1</i4></value></member>' +
@@ -115,7 +115,7 @@ describe('parseXmlRpc — fault', () => {
 });
 
 describe('parseXmlRpc — methodCall (callback server)', () => {
-  it('ritorna {methodName, params}', () => {
+  it('returns {methodName, params}', () => {
     const xml =
       '<?xml version="1.0"?><methodCall><methodName>event</methodName><params>' +
       '<param><value><string>MyCCU-HmIP-RF</string></value></param>' +
@@ -130,7 +130,7 @@ describe('parseXmlRpc — methodCall (callback server)', () => {
     expect(call.params).toEqual(['MyCCU-HmIP-RF', 'VCU001:1', 'STATE', true]);
   });
 
-  it('methodCall senza params → params vuoto', () => {
+  it('methodCall without params → empty params', () => {
     const xml = '<methodCall><methodName>listMethods</methodName></methodCall>';
     const parsed = parseXmlRpc(xml);
     expect(parsed.kind).toBe('call');
@@ -138,18 +138,18 @@ describe('parseXmlRpc — methodCall (callback server)', () => {
   });
 });
 
-describe('parseXmlRpc — robustezza', () => {
-  it('body vuoto → EmptyBodyError', () => {
+describe('parseXmlRpc — robustness', () => {
+  it('empty body → EmptyBodyError', () => {
     expect(() => parseXmlRpc('')).toThrow(EmptyBodyError);
     expect(() => parseXmlRpc('   ')).toThrow(EmptyBodyError);
   });
 
-  it('XML non riconoscibile come rpc → throw', () => {
+  it('XML not recognizable as rpc → throw', () => {
     expect(() => parseXmlRpc('<html><body>oops</body></html>')).toThrow();
   });
 
-  it('accetta input come Buffer latin1 con accenti e decodifica il valore', () => {
-    // Costruisci un vero buffer latin1: 'é' = byte 0xE9 (singolo byte in ISO-8859-1).
+  it('accepts input as a latin1 Buffer with accents and decodes the value', () => {
+    // Build a real latin1 buffer: 'é' = byte 0xE9 (single byte in ISO-8859-1).
     const head = Buffer.from(
       '<?xml version="1.0" encoding="iso-8859-1"?><methodResponse><params><param><value><string>caf',
       'latin1',

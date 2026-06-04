@@ -6,7 +6,7 @@ import {
 } from '../../../../src/transport/xmlrpc/fault-codes.js';
 
 describe('fault-codes', () => {
-  it('enum riporta i valori di protocollo', () => {
+  it('enum reports the protocol values', () => {
     expect(XmlRpcFaultCode.GENERIC).toBe(-1);
     expect(XmlRpcFaultCode.INSUFFICIENT_DUTYCYCLE).toBe(-8);
     expect(XmlRpcFaultCode.TRANSMISSION_PENDING).toBe(-10);
@@ -16,7 +16,7 @@ describe('fault-codes', () => {
     expect([...RETRYABLE_FAULT_CODES].sort((a, b) => a - b)).toEqual([-10, -9, -8, -1]);
   });
 
-  it('isRetryableFaultCode discrimina correttamente', () => {
+  it('isRetryableFaultCode discriminates correctly', () => {
     expect(isRetryableFaultCode(-1)).toBe(true);
     expect(isRetryableFaultCode(-8)).toBe(true);
     expect(isRetryableFaultCode(-9)).toBe(true);

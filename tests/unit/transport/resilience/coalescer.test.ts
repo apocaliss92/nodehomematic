@@ -17,23 +17,23 @@ function deferred<T>(): {
 }
 
 describe('makeKey', () => {
-  it('compone method + args separati da :', () => {
+  it('composes method + args separated by :', () => {
     expect(makeKey('getParamset', ['VCU001', 1, 'VALUES'])).toBe('getParamset:VCU001:1:VALUES');
   });
 
-  it('serializza gli object con chiavi ordinate', () => {
+  it('serializes objects with ordered keys', () => {
     const k1 = makeKey('putParamset', [{ b: 2, a: 1 }]);
     const k2 = makeKey('putParamset', [{ a: 1, b: 2 }]);
     expect(k1).toBe(k2);
   });
 
-  it('gestisce array annidati e null', () => {
+  it('handles nested arrays and null', () => {
     expect(makeKey('m', [[1, 2], null])).toContain('m:');
   });
 });
 
 describe('RequestCoalescer', () => {
-  it('due chiamate concorrenti con la stessa key invocano fn una sola volta', async () => {
+  it('two concurrent calls with the same key invoke fn only once', async () => {
     const coalescer = new RequestCoalescer();
     const d = deferred<string>();
     const fn = vi.fn(() => d.promise);
@@ -47,7 +47,7 @@ describe('RequestCoalescer', () => {
     await expect(p2).resolves.toBe('value');
   });
 
-  it('dopo il completamento una nuova chiamata riesegue fn', async () => {
+  it('after completion a new call re-runs fn', async () => {
     const coalescer = new RequestCoalescer();
     const fn = vi.fn().mockResolvedValue('v');
 
@@ -56,7 +56,7 @@ describe('RequestCoalescer', () => {
     expect(fn).toHaveBeenCalledTimes(2);
   });
 
-  it('propaga il rejection a tutti gli awaiters concorrenti', async () => {
+  it('propagates the rejection to all concurrent awaiters', async () => {
     const coalescer = new RequestCoalescer();
     const d = deferred<string>();
     const fn = vi.fn(() => d.promise);
@@ -71,7 +71,7 @@ describe('RequestCoalescer', () => {
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
-  it('dopo un rejection la key è di nuovo libera', async () => {
+  it('after a rejection the key is free again', async () => {
     const coalescer = new RequestCoalescer();
     const fn = vi.fn().mockRejectedValueOnce(new Error('x')).mockResolvedValue('ok');
 
@@ -80,7 +80,7 @@ describe('RequestCoalescer', () => {
     expect(fn).toHaveBeenCalledTimes(2);
   });
 
-  it('key diverse → chiamate separate', async () => {
+  it('different keys → separate calls', async () => {
     const coalescer = new RequestCoalescer();
     const fn = vi.fn().mockResolvedValue('v');
     await Promise.all([coalescer.coalesce('a', fn), coalescer.coalesce('b', fn)]);

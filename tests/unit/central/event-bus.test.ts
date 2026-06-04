@@ -13,7 +13,7 @@ function valueEvent(channelAddress: string, value: unknown): CentralEvent {
 }
 
 describe('central/events', () => {
-  it('eventKey ritorna la chiave naturale per ogni tipo', () => {
+  it('eventKey returns the natural key for each type', () => {
     expect(eventKey(valueEvent('VCU1:1', true))).toBe(
       dpkToUniqueId(makeDpk('iface-1', 'VCU1:1', 'VALUES', 'STATE')),
     );
@@ -34,7 +34,7 @@ describe('central/events', () => {
 });
 
 describe('central/event-bus', () => {
-  it('subscribe per tipo riceve l evento corrispondente', async () => {
+  it('subscribe by type receives the matching event', async () => {
     const bus = new EventBus();
     const received: CentralEvent[] = [];
     bus.subscribe({ type: 'ready', handler: (e) => void received.push(e) });
@@ -43,7 +43,7 @@ describe('central/event-bus', () => {
     expect(bus.subscriptionCount).toBe(1);
   });
 
-  it('non recapita eventi di tipo diverso', async () => {
+  it('does not deliver events of a different type', async () => {
     const bus = new EventBus();
     const handler = vi.fn();
     bus.subscribe({ type: 'deviceAdded', handler });
@@ -51,7 +51,7 @@ describe('central/event-bus', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it('key-specific riceve solo la sua key, wildcard riceve tutto del tipo', async () => {
+  it('key-specific receives only its key, wildcard receives everything of the type', async () => {
     const bus = new EventBus();
     const keyed: string[] = [];
     const wild: string[] = [];
@@ -69,7 +69,7 @@ describe('central/event-bus', () => {
     expect(wild).toEqual(['ABC', 'OTHER']);
   });
 
-  it('rispetta l ordine di priorità poi insertion order', async () => {
+  it('respects the priority order then insertion order', async () => {
     const bus = new EventBus();
     const order: string[] = [];
     bus.subscribe({
@@ -97,7 +97,7 @@ describe('central/event-bus', () => {
     expect(order).toEqual(['critical', 'normal-1', 'normal-2', 'low']);
   });
 
-  it('un handler che lancia non blocca gli altri e logga via logger iniettato', async () => {
+  it('a handler that throws does not block the others and logs via the injected logger', async () => {
     const logger = { error: vi.fn() };
     const bus = new EventBus({ logger });
     const ran: string[] = [];
@@ -115,7 +115,7 @@ describe('central/event-bus', () => {
     expect(logger.error).toHaveBeenCalledTimes(1);
   });
 
-  it('unsubscribe ferma la consegna', async () => {
+  it('unsubscribe stops delivery', async () => {
     const bus = new EventBus();
     const handler = vi.fn();
     const off = bus.subscribe({ type: 'ready', handler });
@@ -125,7 +125,7 @@ describe('central/event-bus', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it('publishBatch consegna tutti gli eventi', async () => {
+  it('publishBatch delivers all the events', async () => {
     const bus = new EventBus();
     const added: string[] = [];
     bus.subscribe({ type: 'deviceAdded', handler: (e) => void added.push(e.address) });
@@ -137,7 +137,7 @@ describe('central/event-bus', () => {
     expect(added).toEqual(['A', 'B']);
   });
 
-  it('clear rimuove tutte le sottoscrizioni', async () => {
+  it('clear removes all subscriptions', async () => {
     const bus = new EventBus();
     const handler = vi.fn();
     bus.subscribe({ type: 'ready', handler });
@@ -147,7 +147,7 @@ describe('central/event-bus', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it('handler async vengono attesi', async () => {
+  it('async handlers are awaited', async () => {
     const bus = new EventBus();
     let done = false;
     bus.subscribe({

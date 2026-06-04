@@ -47,8 +47,8 @@ describe.runIf(E2E)('facade e2e smoke (real CCU)', () => {
       );
 
       console.log(
-        `[e2e] facade → ${devices.length} device, ${totalChannels} canali, ` +
-          `${totalDataPoints} data point`,
+        `[e2e] facade → ${devices.length} devices, ${totalChannels} channels, ` +
+          `${totalDataPoints} data points`,
       );
 
       expect(devices.length).toBeGreaterThan(0);
@@ -64,9 +64,9 @@ describe.runIf(E2E)('facade e2e smoke (real CCU)', () => {
 
       const configParams = hm.getConfigParams(channelWithDps.address);
       console.log(
-        `[e2e] esempio device ${sample!.address} "${sample!.name ?? ''}" — ` +
-          `canale ${channelWithDps.address}: ${channelWithDps.dataPoints.length} data point, ` +
-          `${configParams.length} parametri MASTER`,
+        `[e2e] example device ${sample!.address} "${sample!.name ?? ''}" — ` +
+          `channel ${channelWithDps.address}: ${channelWithDps.dataPoints.length} data points, ` +
+          `${configParams.length} MASTER params`,
       );
 
       // Brief window for spontaneous value events.

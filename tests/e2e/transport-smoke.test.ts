@@ -1,10 +1,10 @@
 /**
- * E2E smoke test del layer transport contro una CCU3/RaspberryMatic REALE.
+ * E2E smoke test of the transport layer against a REAL CCU3/RaspberryMatic.
  *
- * Read-only: login JSON-RPC, listDevices XML-RPC, init callback + breve attesa
- * eventi + deinit. NON esegue setValue/putParamset (non modifica i dispositivi).
+ * Read-only: JSON-RPC login, XML-RPC listDevices, callback init + brief wait
+ * for events + deinit. Does NOT run setValue/putParamset (does not modify the devices).
  *
- * Gated da HM_E2E=1. Eseguire con le variabili del .env nell'ambiente, es.:
+ * Gated by HM_E2E=1. Run with the .env variables in the environment, e.g.:
  *   set -a; source .env; set +a; npx vitest run tests/e2e/transport-smoke.test.ts
  */
 import { describe, it, expect } from 'vitest';
@@ -42,7 +42,7 @@ const xmlRpcPort: Record<string, number> = {
   [Interface.BIDCOS_RF]: 2001,
 };
 
-describe.runIf(E2E)('transport e2e smoke (CCU reale)', () => {
+describe.runIf(E2E)('transport e2e smoke (real CCU)', () => {
   it('JSON-RPC: login + Device.listAllDetail', async () => {
     const client = new JsonRpcClient({
       url: `${scheme}://${host}`,
@@ -55,13 +55,13 @@ describe.runIf(E2E)('transport e2e smoke (CCU reale)', () => {
 
     const detail = await client.post(JsonRpcMethod.DEVICE_LIST_ALL_DETAIL, {}, { sessionId });
     expect(Array.isArray(detail)).toBe(true);
-    console.log(`[e2e] Device.listAllDetail → ${(detail as unknown[]).length} dispositivi`);
+    console.log(`[e2e] Device.listAllDetail → ${(detail as unknown[]).length} devices`);
 
     await session.logout();
     await client.close();
   }, 30_000);
 
-  it('XML-RPC: listDevices sull’interfaccia selezionata', async () => {
+  it('XML-RPC: listDevices on the selected interface', async () => {
     const iface = pickInterface();
     const port = xmlRpcPort[iface] ?? 2010;
     const client = new InterfaceClient({
@@ -74,11 +74,11 @@ describe.runIf(E2E)('transport e2e smoke (CCU reale)', () => {
     });
     const devices = await client.listDevices();
     expect(Array.isArray(devices)).toBe(true);
-    console.log(`[e2e] ${iface} listDevices → ${devices.length} entry (device+canali)`);
+    console.log(`[e2e] ${iface} listDevices → ${devices.length} entries (devices+channels)`);
     expect(devices.length).toBeGreaterThan(0);
   }, 30_000);
 
-  it('Callback: init → attesa eventi (≤8s) → deinit', async () => {
+  it('Callback: init → wait for events (≤8s) → deinit', async () => {
     const iface = pickInterface();
     const port = xmlRpcPort[iface] ?? 2010;
     const received: RawCallbackEvent[] = [];
@@ -100,19 +100,19 @@ describe.runIf(E2E)('transport e2e smoke (CCU reale)', () => {
 
     try {
       await client.initProxy();
-      // breve finestra per ricevere eventuali push spontanei (newDevices/event/pong)
+      // brief window to receive any spontaneous push notifications (newDevices/event/pong)
       await new Promise((r) => setTimeout(r, 8_000));
       console.log(
-        `[e2e] callback ricevuti in 8s: ${received.length}` +
+        `[e2e] callbacks received in 8s: ${received.length}` +
           (received.length
-            ? ` (tipi: ${[...new Set(received.map((e) => e.type))].join(',')})`
+            ? ` (types: ${[...new Set(received.map((e) => e.type))].join(',')})`
             : ''),
       );
     } finally {
       await client.deinitProxy().catch(() => undefined);
       await server.stop();
     }
-    // non asseriamo received>0 (dipende da attività dei device); l'init/deinit senza throw è il segnale chiave
+    // we do not assert received>0 (depends on device activity); init/deinit without a throw is the key signal
     expect(true).toBe(true);
   }, 30_000);
 });

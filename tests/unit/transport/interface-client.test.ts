@@ -45,12 +45,12 @@ function makeSubject(opts?: {
 }
 
 describe('InterfaceClient', () => {
-  it('expose interfaceId come "{centralName}-{interface}"', () => {
+  it('exposes interfaceId as "{centralName}-{interface}"', () => {
     const subject = makeSubject();
     expect(subject.interfaceId).toBe('MyCCU-HmIP-RF');
   });
 
-  it('initProxy chiama init con [callbackUrl, interfaceId] e va in CONNECTED', async () => {
+  it('initProxy calls init with [callbackUrl, interfaceId] and goes to CONNECTED', async () => {
     const { client, calls } = makeFakeClient();
     const subject = makeSubject({ client });
     await subject.initProxy();
@@ -61,7 +61,7 @@ describe('InterfaceClient', () => {
     expect(subject.state).toBe(ClientState.CONNECTED);
   });
 
-  it('deinitProxy chiama init con un SINGOLO argomento [callbackUrl]', async () => {
+  it('deinitProxy calls init with a SINGLE argument [callbackUrl]', async () => {
     const { client, calls } = makeFakeClient();
     const subject = makeSubject({ client });
     await subject.initProxy();
@@ -73,7 +73,7 @@ describe('InterfaceClient', () => {
     });
   });
 
-  it('setValue ritenta su fault -8 e poi risolve', async () => {
+  it('setValue retries on fault -8 and then resolves', async () => {
     let attempts = 0;
     const { client } = makeFakeClient((method) => {
       if (method === 'setValue') {
@@ -91,7 +91,7 @@ describe('InterfaceClient', () => {
     expect(attempts).toBe(2);
   });
 
-  it('setValue NON ritenta su AuthFailureError', async () => {
+  it('setValue does NOT retry on AuthFailureError', async () => {
     let attempts = 0;
     const { client } = makeFakeClient((method) => {
       if (method === 'setValue') {
@@ -107,7 +107,7 @@ describe('InterfaceClient', () => {
     expect(attempts).toBe(1);
   });
 
-  it('chiamata non-bypass su breaker OPEN lancia CircuitBreakerOpenError e registra una rejection', async () => {
+  it('a non-bypass call on an OPEN breaker throws CircuitBreakerOpenError and records a rejection', async () => {
     const breaker = new CircuitBreaker();
     for (let i = 0; i < 5; i += 1) breaker.recordFailure();
     const { client, calls } = makeFakeClient();
@@ -119,7 +119,7 @@ describe('InterfaceClient', () => {
     expect(calls.find((c) => c.method === 'getValue')).toBeUndefined();
   });
 
-  it('chiamata bypass (ping) passa anche con breaker OPEN', async () => {
+  it('a bypass call (ping) passes even with an OPEN breaker', async () => {
     const breaker = new CircuitBreaker();
     for (let i = 0; i < 5; i += 1) breaker.recordFailure();
     const { client, calls } = makeFakeClient();
@@ -128,7 +128,7 @@ describe('InterfaceClient', () => {
     expect(calls).toContainEqual({ method: 'ping', params: ['MyCCU-HmIP-RF'] });
   });
 
-  it('listDevices ritorna le device description dell array', async () => {
+  it('listDevices returns the device descriptions from the array', async () => {
     const { client } = makeFakeClient((method) => {
       if (method === 'listDevices') {
         return Promise.resolve([{ ADDRESS: 'VCU001:1', TYPE: 'X' }]);
@@ -140,7 +140,7 @@ describe('InterfaceClient', () => {
     expect(devices).toEqual([{ ADDRESS: 'VCU001:1', TYPE: 'X' }]);
   });
 
-  it('getParamsetDescription ritorna la struct (coalesced)', async () => {
+  it('getParamsetDescription returns the struct (coalesced)', async () => {
     const { client, calls } = makeFakeClient((method) => {
       if (method === 'getParamsetDescription') {
         return Promise.resolve({ STATE: { TYPE: 'BOOL' } });
@@ -157,7 +157,7 @@ describe('InterfaceClient', () => {
     expect(calls.filter((c) => c.method === 'getParamsetDescription')).toHaveLength(1);
   });
 
-  it('getParamset ritorna la struct', async () => {
+  it('getParamset returns the struct', async () => {
     const { client } = makeFakeClient((method) => {
       if (method === 'getParamset') return Promise.resolve({ STATE: true });
       return Promise.resolve(true);
@@ -166,7 +166,7 @@ describe('InterfaceClient', () => {
     await expect(subject.getParamset('VCU001:1', 'VALUES')).resolves.toEqual({ STATE: true });
   });
 
-  it('getValue ritorna il valore grezzo', async () => {
+  it('getValue returns the raw value', async () => {
     const { client } = makeFakeClient((method) => {
       if (method === 'getValue') return Promise.resolve(21.5);
       return Promise.resolve(true);
@@ -175,7 +175,7 @@ describe('InterfaceClient', () => {
     await expect(subject.getValue('VCU001:1', 'TEMP')).resolves.toBe(21.5);
   });
 
-  it('putParamset chiama putParamset con i valori e accetta rxMode', async () => {
+  it('putParamset calls putParamset with the values and accepts rxMode', async () => {
     const { client, calls } = makeFakeClient();
     const subject = makeSubject({ client });
     await subject.putParamset('VCU001:1', 'VALUES', { STATE: true }, 'BURST');
@@ -185,7 +185,7 @@ describe('InterfaceClient', () => {
     });
   });
 
-  it('setValue con rxMode passa il quarto argomento', async () => {
+  it('setValue with rxMode passes the fourth argument', async () => {
     const { client, calls } = makeFakeClient();
     const subject = makeSubject({ client });
     await subject.setValue('VCU001:1', 'STATE', true, 'WAKEUP');
@@ -195,7 +195,7 @@ describe('InterfaceClient', () => {
     });
   });
 
-  it('getInstallMode ritorna il numero', async () => {
+  it('getInstallMode returns the number', async () => {
     const { client } = makeFakeClient((method) => {
       if (method === 'getInstallMode') return Promise.resolve(60);
       return Promise.resolve(true);
@@ -204,7 +204,7 @@ describe('InterfaceClient', () => {
     await expect(subject.getInstallMode()).resolves.toBe(60);
   });
 
-  it('getVersion e listMethods (bypass) ritornano stringa e array', async () => {
+  it('getVersion and listMethods (bypass) return a string and an array', async () => {
     const { client } = makeFakeClient((method) => {
       if (method === 'getVersion') return Promise.resolve('3.2.1');
       if (method === 'system.listMethods') return Promise.resolve(['init', 'ping']);
@@ -215,7 +215,7 @@ describe('InterfaceClient', () => {
     await expect(subject.listMethods()).resolves.toEqual(['init', 'ping']);
   });
 
-  it('initProxy fallito porta la state machine in FAILED e rilancia', async () => {
+  it('a failed initProxy moves the state machine to FAILED and rethrows', async () => {
     const { client } = makeFakeClient((method) => {
       if (method === 'init') return Promise.reject(new Error('boom'));
       return Promise.resolve(true);
@@ -225,7 +225,7 @@ describe('InterfaceClient', () => {
     expect(subject.state).toBe(ClientState.FAILED);
   });
 
-  it('onStateChange notifica i subscriber sulle transizioni', async () => {
+  it('onStateChange notifies subscribers on transitions', async () => {
     const { client } = makeFakeClient();
     const subject = makeSubject({ client });
     const states: ClientState[] = [];
@@ -235,7 +235,7 @@ describe('InterfaceClient', () => {
     expect(states).toContain(ClientState.CONNECTED);
   });
 
-  it('deinitProxy porta in DISCONNECTED dopo init', async () => {
+  it('deinitProxy moves to DISCONNECTED after init', async () => {
     const { client } = makeFakeClient();
     const subject = makeSubject({ client });
     await subject.initProxy();
@@ -243,7 +243,7 @@ describe('InterfaceClient', () => {
     expect(subject.state).toBe(ClientState.DISCONNECTED);
   });
 
-  it('usa la factory di default (XmlRpcClient) quando makeClient non e fornito', () => {
+  it('uses the default factory (XmlRpcClient) when makeClient is not provided', () => {
     const subject = new InterfaceClient({
       centralName: 'MyCCU',
       interface: Interface.HMIP_RF,
@@ -256,7 +256,7 @@ describe('InterfaceClient', () => {
     expect(subject.state).toBe(ClientState.CREATED);
   });
 
-  it('getInstallMode ritorna 0 se la CCU risponde con un non-numero', async () => {
+  it('getInstallMode returns 0 if the CCU responds with a non-number', async () => {
     const { client } = makeFakeClient((method) => {
       if (method === 'getInstallMode') return Promise.resolve('nope');
       return Promise.resolve(true);
@@ -265,7 +265,7 @@ describe('InterfaceClient', () => {
     await expect(subject.getInstallMode()).resolves.toBe(0);
   });
 
-  it('getVersion rifiuta una risposta non scalare', async () => {
+  it('getVersion rejects a non-scalar response', async () => {
     const { client } = makeFakeClient((method) => {
       if (method === 'getVersion') return Promise.resolve({ weird: 1 });
       return Promise.resolve(true);
@@ -274,7 +274,7 @@ describe('InterfaceClient', () => {
     await expect(subject.getVersion()).rejects.toThrow();
   });
 
-  it('listMethods ritorna [] se la risposta non e un array', async () => {
+  it('listMethods returns [] if the response is not an array', async () => {
     const { client } = makeFakeClient((method) => {
       if (method === 'system.listMethods') return Promise.resolve('nope');
       return Promise.resolve(true);
@@ -283,7 +283,7 @@ describe('InterfaceClient', () => {
     await expect(subject.listMethods()).resolves.toEqual([]);
   });
 
-  it('listDevices rifiuta una risposta non-array', async () => {
+  it('listDevices rejects a non-array response', async () => {
     const { client } = makeFakeClient((method) => {
       if (method === 'listDevices') return Promise.resolve({ not: 'array' });
       return Promise.resolve(true);
@@ -292,7 +292,7 @@ describe('InterfaceClient', () => {
     await expect(subject.listDevices()).rejects.toThrow();
   });
 
-  it('getParamset rifiuta una risposta non-struct', async () => {
+  it('getParamset rejects a non-struct response', async () => {
     const { client } = makeFakeClient((method) => {
       if (method === 'getParamset') return Promise.resolve([1, 2, 3]);
       return Promise.resolve(true);
@@ -301,7 +301,7 @@ describe('InterfaceClient', () => {
     await expect(subject.getParamset('VCU001:1', 'VALUES')).rejects.toThrow();
   });
 
-  it('initProxy due volte consecutive ripercorre transizioni valide', async () => {
+  it('initProxy twice in a row re-traverses valid transitions', async () => {
     const { client } = makeFakeClient();
     const subject = makeSubject({ client });
     await subject.initProxy();
@@ -310,7 +310,7 @@ describe('InterfaceClient', () => {
     expect(subject.state).toBe(ClientState.CONNECTED);
   });
 
-  it('costruisce la URL XML-RPC con il path (/groups) quando fornito', () => {
+  it('builds the XML-RPC URL with the path (/groups) when provided', () => {
     let capturedUrl: string | undefined;
     const subject = new InterfaceClient({
       centralName: 'MyCCU',
@@ -327,7 +327,7 @@ describe('InterfaceClient', () => {
     expect(capturedUrl).toBe('http://ccu.local:9292/groups');
   });
 
-  it('senza path la URL XML-RPC termina con /', () => {
+  it('without a path the XML-RPC URL ends with /', () => {
     let capturedUrl: string | undefined;
     new InterfaceClient({
       centralName: 'MyCCU',
@@ -342,7 +342,7 @@ describe('InterfaceClient', () => {
     expect(capturedUrl).toBe('http://ccu.local:2010/');
   });
 
-  it('getDeviceDescription concorrente sulla stessa address chiama il client una volta', async () => {
+  it('concurrent getDeviceDescription on the same address calls the client once', async () => {
     let calls = 0;
     let resolveFn: ((v: XmlRpcValue) => void) | undefined;
     const { client } = makeFakeClient((method) => {
