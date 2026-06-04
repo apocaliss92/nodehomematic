@@ -1,168 +1,169 @@
-# nodehomematic — Design (porting Node.js/TypeScript di aiohomematic)
+# nodehomematic — Design (Node.js/TypeScript port of aiohomematic)
 
-- **Data:** 2026-06-04
-- **Repo target:** `apocaliss92/nodehomematic`
-- **Riferimento:** [sukramj/aiohomematic](https://github.com/sukramj/aiohomematic) (libreria Python async, backend dell'integrazione Home Assistant "Homematic(IP) Local")
-- **Stato:** approvato in brainstorming, pronto per writing-plans
+- **Date:** 2026-06-04
+- **Target repo:** `apocaliss92/nodehomematic`
+- **Reference:** [sukramj/aiohomematic](https://github.com/sukramj/aiohomematic) (async Python library, backend of the Home Assistant "Homematic(IP) Local" integration)
+- **Status:** approved in brainstorming, ready for writing-plans
 
-## 1. Obiettivo e scope
+## 1. Goal and scope
 
-Libreria **npm standalone** in **TypeScript strict** che porta `aiohomematic` su Node.js, con i seguenti confini concordati:
+A **standalone npm** library in **strict TypeScript** that ports `aiohomematic` to Node.js, with the following agreed boundaries:
 
-- **Backend:** solo **CCU3 / RaspberryMatic / OpenCCU** (XML-RPC + JSON-RPC). Homegear/CUxD/CCU-Jack fuori scope iniziale.
-- **API pubblica agnostica:** un sistema esterno (app NodeJS dell'utente) interagisce solo con una facade, mai con i dettagli CCU/XML-RPC.
-- **Funzionalità:** complete per CCU3 — connessione, discovery, model generico + **tutti i tipi custom** (a fasi), hub (sysvar/programmi).
-- **Approccio:** porting a strati **fedele** ad aiohomematic (eredita decisioni collaudate), con API TS idiomatica sopra.
+- **Backend:** only **CCU3 / RaspberryMatic / OpenCCU** (XML-RPC + JSON-RPC). Homegear/CUxD/CCU-Jack out of the initial scope.
+- **System-agnostic public API:** an external system (the user's NodeJS app) interacts only with a facade, never with the CCU/XML-RPC details.
+- **Functionality:** complete for CCU3 — connection, discovery, generic model + **all custom types** (phased), hub (sysvar/programs).
+- **Approach:** layered port **faithful** to aiohomematic (inherits battle-tested decisions), with an idiomatic TS API on top.
 
-### Non-goal (iniziali)
-- Backend diversi da CCU3/RaspberryMatic.
-- Sottoscrizioni eventi per singolo device (è sufficiente **uno stream globale**).
-- Replica 1:1 dei decoratori/idiomi Python.
+### Non-goals (initial)
+- Backends other than CCU3/RaspberryMatic.
+- Per-device event subscriptions (**a single global stream** is sufficient).
+- 1:1 replication of Python decorators/idioms.
 
-## 2. Architettura a strati e layout
+## 2. Layered architecture and layout
 
-Pacchetto npm singolo, TypeScript strict, build ESM+CJS via `tsup`, target Node 20+. File piccoli e focalizzati (200–400 righe, max 800). Stato di dominio **immutabile**.
+Single npm package, strict TypeScript, ESM+CJS build via `tsup`, target Node 20+. Small, focused files (200–400 lines, max 800). **Immutable** domain state.
 
 ```
 src/
-  transport/            # comunicazione, nessuna logica di dominio
-    xmlrpc/             # client + parser/serializer XML-RPC (quirk Homematic)
-    jsonrpc/            # client JSON-RPC WebUI CCU (auth, names, rooms, programs, sysvars)
-    callback-server/    # server XML-RPC che riceve i push dalla CCU
+  transport/            # communication, no domain logic
+    xmlrpc/             # XML-RPC client + parser/serializer (Homematic quirks)
+    jsonrpc/            # CCU WebUI JSON-RPC client (auth, names, rooms, programs, sysvars)
+    callback-server/    # XML-RPC server that receives push notifications from the CCU
     resilience/         # circuit-breaker, retry, throttle, request-coalescer
-    interface-client.ts # un client per interfaccia (BidCos-RF, HmIP-RF, ...)
-  central/              # orchestrazione
-    central-unit.ts     # facciata interna: client + callback, discovery, reconnect
-    device-registry.ts  # fonte di verità dei device scoperti (immutabile)
-    discovery.ts        # listDevices/getDeviceDescription/getParamsetDescription + arricchimento JSON-RPC
-    cache/              # cache persistente (device/paramset descriptions, names)
-    event-bus.ts        # bus eventi interno tipizzato
+    interface-client.ts # one client per interface (BidCos-RF, HmIP-RF, ...)
+  central/              # orchestration
+    central-unit.ts     # internal facade: client + callback, discovery, reconnect
+    device-registry.ts  # source of truth for discovered devices (immutable)
+    discovery.ts        # listDevices/getDeviceDescription/getParamsetDescription + JSON-RPC enrichment
+    cache/              # persistent cache (device/paramset descriptions, names)
+    event-bus.ts        # typed internal event bus
     connection-state.ts / health.ts / scheduler.ts
   model/
     data-point.ts       # base data point
     device.ts / channel.ts
-    generic/            # data point generici (per parametro VALUES)
-    custom/             # light, switch, cover, climate, lock, ... (a fasi)
-    hub/                # system variables, programmi
-    calculated/ combined/   # derivati (fase tarda)
-  api/                  # API PUBBLICA agnostica
-    homematic.ts        # classe facade: connect/listDevices/getValue/setValue
-    events.ts           # tipi eventi + EventEmitter tipizzato
-    types.ts            # Device, Channel, DataPoint, CustomEntity, payload eventi
-  support/              # const, errori, logger, validazione (zod), i18n opz.
-  index.ts              # entrypoint pubblico (ri-esporta solo api/)
+    generic/            # generic data points (per VALUES parameter)
+    custom/             # light, switch, cover, climate, lock, ... (phased)
+    hub/                # system variables, programs
+    calculated/ combined/   # derived (later phase)
+  api/                  # system-agnostic PUBLIC API
+    homematic.ts        # facade class: connect/listDevices/getValue/setValue
+    events.ts           # event types + typed EventEmitter
+    types.ts            # Device, Channel, DataPoint, CustomEntity, event payloads
+  support/              # constants, errors, logger, validation (zod), optional i18n
+  index.ts              # public entrypoint (re-exports only api/)
 tests/
   unit/ integration/ fixtures/ e2e/
 ```
 
-**Confine pubblico:** `api/` è l'unico import esposto. `transport`/`central`/`model` sono interni.
+**Public boundary:** `api/` is the only exposed import. `transport`/`central`/`model` are internal.
 
 ## 3. Transport layer
 
-Senza logica di dominio: parla "metodi CCU grezzi" ed emette eventi grezzi normalizzati.
+No domain logic: it speaks "raw CCU methods" and emits normalized raw events.
 
 ### XML-RPC client (`transport/xmlrpc/`)
-Verso le interfacce CCU (porte tipiche: BidCos-RF 2001, HmIP-RF 2010, Virtual/Groups 9292; varianti TLS). Metodi: `init`, `getDeviceDescription`, `listDevices`, `getParamsetDescription`, `getParamset`, `getValue`, `setValue`, `putParamset`, `system.multicall`, `ping`.
-- **Riuso:** partenza dal pacchetto npm `xmlrpc` (client+server) dietro un nostro `RpcProxy`. Se emergono quirk Homematic (encoding ISO-8859-1, tipi `i8`/`double`, `system.multicall`) si sostituisce il serializer interno con uno custom su `fast-xml-parser` **senza toccare i consumer**.
+Toward the CCU interfaces (typical ports: BidCos-RF 2001, HmIP-RF 2010, Virtual/Groups 9292; TLS variants). Methods: `init`, `getDeviceDescription`, `listDevices`, `getParamsetDescription`, `getParamset`, `getValue`, `setValue`, `putParamset`, `system.multicall`, `ping`.
+- **Reuse:** start from the npm `xmlrpc` package (client+server) behind our own `RpcProxy`. If Homematic quirks surface (ISO-8859-1 encoding, `i8`/`double` types, `system.multicall`), the internal serializer is replaced with a custom one based on `fast-xml-parser` **without touching the consumers**.
 
 ### JSON-RPC client (`transport/jsonrpc/`)
-Verso la WebUI CCU (`/api/homematic.cgi`) per ciò che l'XML-RPC non offre: `Session.login/logout`, nomi device/canali, stanze (`Room`), funzioni (`Subsection`), programmi, system variables. `undici`/fetch nativo, gestione session-id con re-login a scadenza.
+Toward the CCU WebUI (`/api/homematic.cgi`) for what XML-RPC does not offer: `Session.login/logout`, device/channel names, rooms (`Room`), functions (`Subsection`), programs, system variables. `undici`/native fetch, session-id handling with re-login on expiry.
 
 ### Callback server (`transport/callback-server/`)
-Server XML-RPC HTTP richiamato dalla CCU dopo `init(callbackUrl, interfaceId)`. Gestisce `event`, `newDevices`, `deleteDevices`, `updateDevice`, `replaceDevice`, `readdedDevice`, `listDevices`, `system.listMethods`, `system.multicall`. Normalizza ogni push in eventi interni sul bus.
+XML-RPC HTTP server invoked by the CCU after `init(callbackUrl, interfaceId)`. Handles `event`, `newDevices`, `deleteDevices`, `updateDevice`, `replaceDevice`, `readdedDevice`, `listDevices`, `system.listMethods`, `system.multicall`. Normalizes every push into internal events on the bus.
 
-### Resilienza (`transport/resilience/`)
-Wrapper componibili attorno al proxy: **circuit-breaker** per interfaccia, **retry** con backoff su errori transitori, **throttle** (rate-limit comandi), **request-coalescer** (deduplica letture concorrenti identiche).
+### Resilience (`transport/resilience/`)
+Composable wrappers around the proxy: **circuit-breaker** per interface, **retry** with backoff on transient errors, **throttle** (command rate-limiting), **request-coalescer** (deduplicates identical concurrent reads).
 
-## 4. Central (orchestrazione)
+## 4. Central (orchestration)
 
-`central-unit.ts` lega transport e model.
+`central-unit.ts` ties transport and model together.
 
-- **Lifecycle/connessione:** `start()` crea un `InterfaceClient` per interfaccia abilitata, avvia il callback server, esegue `init` per registrare l'URL di callback, fa proxy-init. `stop()` de-registra con `init(url, "")` e chiude pulito. `connection-state.ts` traccia lo stato per-interfaccia; `health.ts` fa ping periodico; su caduta → backoff, re-`init`, re-sync discovery.
-- **Discovery (`discovery.ts`):** `listDevices` → per ogni device/canale `getDeviceDescription` + `getParamsetDescription` (MASTER/VALUES) → arricchimento con nomi/stanze/funzioni via JSON-RPC → grafo `Device → Channel → Parameter`. `deleteDevices`/`replaceDevice` aggiornano il registry in modo immutabile.
-- **Caching (`cache/`):** cache **persistente** su disco (path configurabile, default attivo) di device/paramset descriptions e nomi; invalidata da versione firmware/CCU. Avvio caldo senza ri-discovery completa.
-- **Event bus (`event-bus.ts`):** bus interno tipizzato; riceve gli eventi grezzi normalizzati dal callback server e li smista (valore data point, device add/remove, lifecycle, diagnostica). Il model si abbona qui.
-- **device-registry.ts:** fonte di verità immutabile, lookup per address/interface.
+- **Lifecycle/connection:** `start()` creates an `InterfaceClient` for each enabled interface, starts the callback server, runs `init` to register the callback URL, and performs proxy-init. `stop()` de-registers with `init(url, "")` and closes cleanly. `connection-state.ts` tracks the per-interface state; `health.ts` does periodic pings; on a drop → backoff, re-`init`, discovery re-sync.
+- **Discovery (`discovery.ts`):** `listDevices` → for each device/channel `getDeviceDescription` + `getParamsetDescription` (MASTER/VALUES) → enrichment with names/rooms/functions via JSON-RPC → `Device → Channel → Parameter` graph. `deleteDevices`/`replaceDevice` update the registry immutably.
+- **Caching (`cache/`):** **persistent** on-disk cache (configurable path, on by default) of device/paramset descriptions and names; invalidated by firmware/CCU version. Warm start without a full re-discovery.
+- **Event bus (`event-bus.ts`):** typed internal bus; receives the normalized raw events from the callback server and dispatches them (data point value, device add/remove, lifecycle, diagnostics). The model subscribes here.
+- **device-registry.ts:** immutable source of truth, lookup by address/interface.
 
-## 5. API pubblica (facade agnostica)
+## 5. Public API (system-agnostic facade)
 
-Unico import pubblico: `nodehomematic`.
+Single public import: `nodehomematic`.
 
 ```ts
 const hm = new Homematic({
   host: '192.168.x.x',
   interfaces: ['HmIP-RF', 'BidCos-RF'],
-  credentials: { username, password },     // per JSON-RPC
-  callback: { host, port },                // url che la CCU richiama
-  cache: { dir: '...', enabled: true },    // persistente, default on
+  credentials: { username, password },     // for JSON-RPC
+  callback: { host, port },                // url the CCU calls back
+  cache: { dir: '...', enabled: true },    // persistent, on by default
   tls: false,
 });
 
-await hm.start();                  // connette, discovery, registra callback
-await hm.stop();                   // de-registra e chiude pulito
+await hm.start();                  // connect, discovery, register callback
+await hm.stop();                   // de-register and close cleanly
 
-hm.devices();                      // snapshot immutabile di tutti i device/entity
-hm.getValue(dpId);                 // lettura (da stato/cache)
-await hm.setValue(dpId, value);    // scrittura validata verso la CCU
-await hm.setValue({ device, channel, parameter }, value); // forma esplicita
+hm.devices();                      // immutable snapshot of all devices/entities
+hm.getValue(dpId);                 // read (from state/cache)
+await hm.setValue(dpId, value);    // validated write toward the CCU
+await hm.setValue({ device, channel, parameter }, value); // explicit form
 ```
 
-**Stream globale tipizzato** (EventEmitter — niente per-device):
+**Typed global stream** (EventEmitter — no per-device):
 
 ```ts
 hm.on('valueChanged', (e) => { /* { dpId, device, channel, parameter, value, prevValue, ts } */ });
-hm.on('deviceAdded',   (e) => { /* device scoperto */ });
+hm.on('deviceAdded',   (e) => { /* discovered device */ });
 hm.on('deviceRemoved', (e) => { /* ... */ });
 hm.on('connection',    (e) => { /* { interface, state } */ });
-hm.on('ready',         () => { /* discovery iniziale completata */ });
+hm.on('ready',         () => { /* initial discovery complete */ });
 hm.on('error',         (err) => { /* ... */ });
 ```
 
-`valueChanged` è il flusso live unico per **tutti** i device connessi. Gli update in uscita passano sempre da `setValue` (validato contro i metadati del data point). Le custom entity espongono metodi comodi (`light.setBrightness(...)`) che internamente usano lo **stesso** percorso `setValue` → un solo cammino di scrittura testabile.
+`valueChanged` is the single live stream for **all** connected devices. Outbound updates always go through `setValue` (validated against the data point metadata). Custom entities expose convenient methods (`light.setBrightness(...)`) that internally use the **same** `setValue` path → a single testable write path.
 
-Tipi esportati agnostici: `Device`, `Channel`, `DataPoint`, `CustomEntity`, payload eventi.
+Exported system-agnostic types: `Device`, `Channel`, `DataPoint`, `CustomEntity`, event payloads.
 
 ## 6. Model layer
 
-Gerarchia immutabile costruita dalla discovery, disaccoppiata dal transport.
+Immutable hierarchy built from discovery, decoupled from transport.
 
-- **Base:** `Device` (address, tipo/firmware, interfaccia, nome/stanza/funzione) → `Channel[]` → `DataPoint[]`. `data-point.ts`: identità stabile `interface:address:channel:parameter`, metadati paramset (tipo, min/max, unit, value-list, flag RO/WO/EVENT), valore corrente, timestamp, availability.
-- **Generic (`model/generic/`):** un data point per parametro VALUES; lettura (evento/cache) e scrittura (`setValue`/`putParamset`) con validazione contro i metadati e conversione tipi CCU↔JS centralizzata (`converter`). Da solo soddisfa "esponi tutto in modo generico".
-- **Custom (`model/custom/`, a fasi):** entità tipizzate di dominio che aggregano data point: `Switch`, `Light`, `Cover`/`Blind`, `Climate`, `Lock`, `Siren`, ecc. Ognuna ha: regola di riconoscimento (per device-type/canali), proprietà di alto livello e metodi che traducono in operazioni sui data point sottostanti.
-- **Hub (`model/hub/`):** system variables e programmi CCU (JSON-RPC) come data point/azioni di primo livello.
-- **Calculated/Combined:** data point derivati e combinati (fase tarda), senza impatto sul confine pubblico.
+- **Base:** `Device` (address, type/firmware, interface, name/room/function) → `Channel[]` → `DataPoint[]`. `data-point.ts`: stable identity `interface:address:channel:parameter`, paramset metadata (type, min/max, unit, value-list, RO/WO/EVENT flags), current value, timestamp, availability.
+- **Generic (`model/generic/`):** one data point per VALUES parameter; read (event/cache) and write (`setValue`/`putParamset`) with validation against the metadata and centralized CCU↔JS type conversion (`converter`). On its own it satisfies "expose everything generically".
+- **Custom (`model/custom/`, phased):** typed domain entities that aggregate data points: `Switch`, `Light`, `Cover`/`Blind`, `Climate`, `Lock`, `Siren`, etc. Each has: a recognition rule (by device-type/channels), high-level properties and methods that translate into operations on the underlying data points.
+- **Hub (`model/hub/`):** CCU system variables and programs (JSON-RPC) as first-level data points/actions.
+- **Calculated/Combined:** derived and combined data points (later phase), with no impact on the public boundary.
 
-Ogni livello si abbona all'event bus, aggiorna lo stato in modo immutabile e ri-emette "valore cambiato" verso la facade.
+Each level subscribes to the event bus, updates the state immutably and re-emits "value changed" toward the facade.
 
 ## 7. Testing
 
-TDD, copertura 80%+, tre livelli.
+TDD, 80%+ coverage, three levels.
 
-- **Unit (vitest):** serializer/parser XML-RPC su fixture reali, resilienza (timer fake deterministici), converter tipi, validazione metadati, regole di riconoscimento custom, riduttori immutabili del registry.
-- **Integration:** **finto CCU** in-process (HTTP che risponde a XML-RPC + JSON-RPC con fixture registrate dalla CCU reale) per il ciclo `start → discovery → callback → valueChanged → setValue`, incluso il callback server che riceve `event`/`newDevices`.
-- **E2E:** contro la CCU3/RaspberryMatic reale — smoke (connessione, discovery, eventi live, una scrittura sicura). Gated da env (`HM_E2E=1` + credenziali), esclusi dalla CI pubblica.
-- **Contract/fixtures:** payload reali catturati dalla CCU (discovery + alcuni eventi) versionati come fixture per allineare integration ed e2e al comportamento vero.
+- **Unit (vitest):** XML-RPC serializer/parser on real fixtures, resilience (deterministic fake timers), type converter, metadata validation, custom recognition rules, immutable registry reducers.
+- **Integration:** in-process **fake CCU** (HTTP responding to XML-RPC + JSON-RPC with fixtures recorded from the real CCU) for the `start → discovery → callback → valueChanged → setValue` cycle, including the callback server that receives `event`/`newDevices`.
+- **E2E:** against the real CCU3/RaspberryMatic — smoke (connection, discovery, live events, one safe write). Gated by env (`HM_E2E=1` + credentials), excluded from the public CI.
+- **Contract/fixtures:** real payloads captured from the CCU (discovery + some events) versioned as fixtures to align integration and e2e with the real behavior.
 
-## 8. Roadmap a fasi
+## 8. Phased roadmap
 
-- **Fase 0 — Scaffold:** repo GitHub `apocaliss92/nodehomematic`, TS strict, `tsup`, vitest, eslint+prettier, CI GitHub Actions, README, LICENSE, struttura cartelle.
-- **Fase 1 — Transport:** XML-RPC client + callback server, JSON-RPC client + sessione, resilienza. Test unit + finto CCU.
-- **Fase 2 — Central:** discovery, registry immutabile, cache persistente, event bus, lifecycle + reconnect.
-- **Fase 3 — Model generic + facade pubblica** (`valueChanged`/`setValue`): primo rilascio end-to-end utile; pubblicazione npm `0.x` (API in evoluzione).
-- **Fase 4 — Custom entity:** una famiglia alla volta (switch → light → cover → climate → lock → …), ognuna con test.
-- **Fase 5 — Hub** (sysvar/programmi) + calculated/combined.
+- **Phase 0 — Scaffold:** GitHub repo `apocaliss92/nodehomematic`, strict TS, `tsup`, vitest, eslint+prettier, GitHub Actions CI, README, LICENSE, folder structure.
+- **Phase 1 — Transport:** XML-RPC client + callback server, JSON-RPC client + session, resilience. Unit tests + fake CCU.
+- **Phase 2 — Central:** discovery, immutable registry, persistent cache, event bus, lifecycle + reconnect.
+- **Phase 3 — Generic model + public facade** (`valueChanged`/`setValue`): first useful end-to-end release; npm `0.x` publication (evolving API).
+- **Phase 4 — Custom entities:** one family at a time (switch → light → cover → climate → lock → …), each with tests.
+- **Phase 5 — Hub** (sysvar/programs) + calculated/combined.
 
-Ogni fase è un ciclo spec→plan→implementazione testato.
+Each phase is a tested spec→plan→implementation cycle.
 
-## 9. Decisioni chiuse e rischi
+## 9. Closed decisions and risks
 
-- **Quirk XML-RPC Homematic** (encoding ISO-8859-1, `system.multicall`, tipi numerici): mitigati dal confine `RpcProxy` con fallback a serializer custom.
-- **Licenza:** ✅ **MIT** (stessa di aiohomematic). Si mantiene il copyright originale `Copyright (c) 2021-2026 SukramJ, Daniel Perna` e si aggiunge il copyright del porting (richiesto da MIT per la redistribuzione).
-- **Nome npm:** ✅ `nodehomematic` disponibile sul registry (verificato 2026-06-04).
-- **Reconnect/CCU restart — requisito rock-solid:** la riconnessione è un requisito di primo livello, non best-effort. La CCU perde la registrazione del callback a ogni riavvio/perdita di rete; il sistema deve:
-  - rilevare la caduta via **health-ping periodico** per interfaccia + assenza di eventi attesi;
-  - ri-eseguire `init(callbackUrl, interfaceId)` con **backoff esponenziale + jitter** finché non riprende;
-  - **re-sync** della discovery dopo il re-init (i device possono essere cambiati durante l'outage);
-  - emettere eventi `connection` di transizione stato così che l'app esterna sappia sempre lo stato reale;
-  - sopravvivere a riavvii prolungati della CCU senza intervento manuale e senza perdere lo stato in cache.
-  - Coperto da test integration dedicati (finto CCU che cade/riparte) oltre che e2e.
+- **Homematic XML-RPC quirks** (ISO-8859-1 encoding, `system.multicall`, numeric types): mitigated by the `RpcProxy` boundary with a fallback to a custom serializer.
+- **License:** ✅ **MIT** (same as aiohomematic). The original copyright `Copyright (c) 2021-2026 SukramJ, Daniel Perna` is kept and the port's copyright is added (required by MIT for redistribution).
+- **npm name:** ✅ `nodehomematic` available on the registry (verified 2026-06-04).
+- **Reconnect/CCU restart — rock-solid requirement:** reconnection is a first-class requirement, not best-effort. The CCU loses the callback registration on every restart/network loss; the system must:
+  - detect the drop via **periodic per-interface health-ping** + absence of expected events;
+  - re-run `init(callbackUrl, interfaceId)` with **exponential backoff + jitter** until it recovers;
+  - **re-sync** discovery after the re-init (devices may have changed during the outage);
+  - emit state-transition `connection` events so the external app always knows the real state;
+  - survive prolonged CCU restarts without manual intervention and without losing the cached state.
+  - Covered by dedicated integration tests (fake CCU that drops/restarts) as well as e2e.
+```

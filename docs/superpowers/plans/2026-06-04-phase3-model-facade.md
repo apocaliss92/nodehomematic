@@ -1,38 +1,38 @@
-# nodehomematic — Fase 3: Model generico + Facade pubblica
+# nodehomematic — Phase 3: Generic model + Public facade
 
 > **For agentic workers:** TDD module-by-module. Builds on Phase 1 (transport) + Phase 2 (central), both merged to main. This phase delivers the FIRST usable npm release: a public `Homematic` facade with a global `valueChanged` stream + `setValue`, on top of a generic data-point model.
 
-**Goal:** Model generico (GenericDataPoint con conversione/validazione CCU↔JS) + viste pubbliche Device/Channel/DataPoint + facade `Homematic` event-driven (stream globale `valueChanged`, `setValue`, eventi lifecycle). Pubblicabile come npm `0.x`.
+**Goal:** Generic model (GenericDataPoint with CCU↔JS conversion/validation) + public Device/Channel/DataPoint views + event-driven `Homematic` facade (global `valueChanged` stream, `setValue`, lifecycle events). Publishable as npm `0.x`.
 
-**Architecture:** Il model si abbona all'`EventBus` del `CentralUnit` (Fase 2): ogni `valueReceived` aggiorna il `GenericDataPoint` corrispondente (via dpk) e produce un cambio di stato. La facade `Homematic` wrappa il `CentralUnit`, espone una superficie pulita e agnostica (nessun tipo CCU/XML-RPC trapela) e ri-emette un EventEmitter tipizzato. Le scritture passano da `setValue` con validazione contro i metadati del data point, poi delegano a `CentralUnit.setValue` → `InterfaceClient`.
+**Architecture:** The model subscribes to the `CentralUnit` `EventBus` (Phase 2): each `valueReceived` updates the corresponding `GenericDataPoint` (via dpk) and produces a state change. The `Homematic` facade wraps the `CentralUnit`, exposes a clean, system-agnostic surface (no CCU/XML-RPC type leaks) and re-emits a typed EventEmitter. Writes go through `setValue` with validation against the data point metadata, then delegate to `CentralUnit.setValue` → `InterfaceClient`.
 
-**Tech Stack:** TypeScript strict, Node 20+. EventEmitter tipizzato (custom, no dep). Validazione conversione interna (no zod necessario qui; i metadati guidano la validazione). Test: vitest + i fake/fake-CCU esistenti; e2e reale opzionale a fine fase.
+**Tech Stack:** strict TypeScript, Node 20+. Typed EventEmitter (custom, no deps). Internal conversion validation (no zod needed here; the metadata drives validation). Tests: vitest + the existing fakes/fake-CCU; real e2e optional at the end of the phase.
 
 ---
 
-## Facts conversione/validazione (da aiohomematic)
+## Conversion/validation facts (from aiohomematic)
 - `ParameterType`: ACTION, BOOL, ENUM, FLOAT, INTEGER, STRING.
-- **Inbound CCU→JS:** empty string `""` → `null` per tipi numerici; BOOL può avere VALUE_LIST (index↔string); cleanup unità; moltiplicatore per certe unità (rinviabile). FLOAT/INTEGER → number; BOOL → boolean; ENUM → indice numerico (la CCU manda l'indice) che possiamo esporre come stringa via VALUE_LIST; STRING → string.
-- **Outbound JS→CCU:** ENUM serializzato come **indice intero per HM, stringa per HmIP** (decidere in base al tipo di MIN: se MIN numerico → indice). Per il primo rilascio: accetta sia indice che stringa-da-VALUE_LIST; converti in indice se la famiglia è HM-style (MIN numerico/valueList presente), altrimenti passa la stringa. Documenta l'euristica.
-- **Validazione write:** writable richiede `OPERATIONS & WRITE`; range MIN/MAX per numerici; ENUM deve essere in VALUE_LIST (o indice valido); BOOL coercibile; ACTION è trigger write-only (valore tipicamente `true`). Errori → `ValidationError`.
-- `available`: il data point è disponibile se il device è online (per ora: sempre true salvo stato connessione interfaccia DISCONNECTED → false). `isValid`: ha un valore confermato + tipo/range validi.
+- **Inbound CCU→JS:** empty string `""` → `null` for numeric types; BOOL may have a VALUE_LIST (index↔string); unit cleanup; multiplier for certain units (deferrable). FLOAT/INTEGER → number; BOOL → boolean; ENUM → numeric index (the CCU sends the index) which we can expose as a string via VALUE_LIST; STRING → string.
+- **Outbound JS→CCU:** ENUM serialized as an **integer index for HM, a string for HmIP** (decide based on the MIN type: if MIN is numeric → index). For the first release: accept both an index and a string-from-VALUE_LIST; convert to an index if the family is HM-style (numeric MIN/valueList present), otherwise pass the string. Document the heuristic.
+- **Write validation:** writable requires `OPERATIONS & WRITE`; MIN/MAX range for numerics; ENUM must be in VALUE_LIST (or a valid index); BOOL coercible; ACTION is a write-only trigger (value typically `true`). Errors → `ValidationError`.
+- `available`: the data point is available if the device is online (for now: always true unless the interface connection state is DISCONNECTED → false). `isValid`: has a confirmed value + valid type/range.
 
 ---
 
-## File structure (Fase 3)
+## File structure (Phase 3)
 ```
 src/model/
   converter.ts        # convertFromCcu(spec, raw) / convertToCcu(spec, value, interfaceFamily) + validate
-  data-point.ts       # GenericDataPoint: dpk, spec, value corrente, write/eventUpdate, readable/writable/hasEvents, subscribe
+  data-point.ts       # GenericDataPoint: dpk, spec, current value, write/eventUpdate, readable/writable/hasEvents, subscribe
   device.ts           # ModelDevice: address, type, name, rooms?, channels: ModelChannel[]
   channel.ts          # ModelChannel: address, index, dataPoints: GenericDataPoint[]
-  model-builder.ts    # costruisce ModelDevice[] da DeviceNode[] (graph Fase 2) creando i GenericDataPoint (uno per parametro VALUES con EVENT/READ)
+  model-builder.ts    # builds ModelDevice[] from DeviceNode[] (Phase 2 graph) creating the GenericDataPoint (one per VALUES parameter with EVENT/READ)
 src/api/
-  emitter.ts          # TypedEventEmitter<EventMap> minimale (on/off/once/emit)
+  emitter.ts          # minimal TypedEventEmitter<EventMap> (on/off/once/emit)
   events.ts           # HomematicEventMap: valueChanged, deviceAdded, deviceRemoved, connection, ready, error
-  types.ts            # tipi pubblici: HmDevice, HmChannel, HmDataPoint, HmValue, DataPointId, payload eventi
-  homematic.ts        # class Homematic: facade su CentralUnit
-src/index.ts          # export pubblico: Homematic + tipi pubblici (NO transport/central interni)
+  types.ts            # public types: HmDevice, HmChannel, HmDataPoint, HmValue, DataPointId, event payloads
+  homematic.ts        # class Homematic: facade over CentralUnit
+src/index.ts          # public export: Homematic + public types (NO internal transport/central)
 tests/unit/model/...  tests/unit/api/...  tests/integration/facade-*.test.ts
 ```
 
@@ -42,81 +42,81 @@ tests/unit/model/...  tests/unit/api/...  tests/integration/facade-*.test.ts
 
 ### Task 1: converter
 - `src/model/converter.ts`:
-  - `convertFromCcu(spec: ParameterSpec, raw: unknown): HmValue` — FLOAT/INTEGER: number; `""`→null; BOOL→boolean (e se VALUE_LIST presente, normalizza); ENUM→ se VALUE_LIST presente e raw è indice numerico → mappa a stringa del VALUE_LIST (mantieni anche l'indice accessibile? per ora esponi la stringa); STRING→string; ACTION→boolean/none.
-  - `convertToCcu(spec, value, opts:{enumAsIndex:boolean}): unknown` — numerici: valida range MIN/MAX → number; BOOL→boolean; ENUM: se `enumAsIndex` converti stringa→indice via VALUE_LIST (o accetta indice), altrimenti passa la stringa; STRING→string; ACTION→true. Throw `ValidationError` su valore non valido (fuori range, enum sconosciuto, tipo incompatibile).
-  - `validateWritable(spec)` → throw `UnsupportedError` se non writable.
+  - `convertFromCcu(spec: ParameterSpec, raw: unknown): HmValue` — FLOAT/INTEGER: number; `""`→null; BOOL→boolean (and if VALUE_LIST present, normalize); ENUM→ if VALUE_LIST present and raw is a numeric index → map to the VALUE_LIST string (also keep the index accessible? for now expose the string); STRING→string; ACTION→boolean/none.
+  - `convertToCcu(spec, value, opts:{enumAsIndex:boolean}): unknown` — numerics: validate MIN/MAX range → number; BOOL→boolean; ENUM: if `enumAsIndex` convert string→index via VALUE_LIST (or accept an index), otherwise pass the string; STRING→string; ACTION→true. Throw `ValidationError` on an invalid value (out of range, unknown enum, incompatible type).
+  - `validateWritable(spec)` → throw `UnsupportedError` if not writable.
   - `HmValue = boolean | number | string | null`.
-- Test: range out-of-bounds → ValidationError; enum string↔index round-trip; empty string→null per FLOAT; BOOL coercion; ACTION→true; write su spec non-writable → UnsupportedError.
+- Test: range out-of-bounds → ValidationError; enum string↔index round-trip; empty string→null for FLOAT; BOOL coercion; ACTION→true; write on a non-writable spec → UnsupportedError.
 - Commit: `feat(model): value converter + validation (CCU↔JS)`.
 
 ### Task 2: GenericDataPoint
 - `src/model/data-point.ts`: `GenericDataPoint`:
-  - costruito da `{ dpk, spec, interfaceFamily }`. Getter: `id` (=dpkToUniqueId), `parameter`, `type`, `readable/writable/hasEvents/visible`, `unit`, `valueList`, `min/max`.
-  - stato: `value: HmValue` (corrente, default null), `lastUpdatedAt?: number`.
-  - `applyCcuValue(raw, at)`: converte via converter e aggiorna `value` + timestamp; ritorna `{changed, prev, next}`.
-  - `prepareWrite(value): unknown`: valida writable + converte a CCU (enumAsIndex deciso da interfaceFamily/spec).
-  - `subscribe(cb: (next, prev) => void): () => void` (notifica locale; la facade userà l'event bus globale, ma il DP può notificare).
-- Test: applyCcuValue aggiorna e segnala changed/prev/next; prepareWrite valida e converte; hasEvents/readable/writable da spec.
+  - built from `{ dpk, spec, interfaceFamily }`. Getters: `id` (=dpkToUniqueId), `parameter`, `type`, `readable/writable/hasEvents/visible`, `unit`, `valueList`, `min/max`.
+  - state: `value: HmValue` (current, default null), `lastUpdatedAt?: number`.
+  - `applyCcuValue(raw, at)`: converts via the converter and updates `value` + timestamp; returns `{changed, prev, next}`.
+  - `prepareWrite(value): unknown`: validates writable + converts to CCU (enumAsIndex decided by interfaceFamily/spec).
+  - `subscribe(cb: (next, prev) => void): () => void` (local notification; the facade will use the global event bus, but the DP can notify).
+- Test: applyCcuValue updates and signals changed/prev/next; prepareWrite validates and converts; hasEvents/readable/writable from spec.
 - Commit: `feat(model): GenericDataPoint`.
 
 ### Task 3: device/channel + model-builder
-- `device.ts`/`channel.ts`: `ModelDevice {address, type, interfaceId, name?, rooms?, channels: ModelChannel[]; dataPoint(channelAddress, parameter)}`, `ModelChannel {address, index, type?, dataPoints: GenericDataPoint[]}`. Immutabili dopo costruzione (i DP hanno stato interno ma la struttura è fissa).
-- `model-builder.ts`: `buildModel(devices: DeviceNode[], interfaceFamilyOf): ModelDevice[]` — per ogni DeviceNode crea ModelChannel per canale e un `GenericDataPoint` per ogni parametro VALUES che è readable o hasEvents (salta parametri puramente interni/SERVICE se vuoi, ma per il primo rilascio includi tutti i VALUES). `interfaceFamilyOf(interfaceId)` → 'HM' | 'HMIP' (euristica: contiene 'HmIP' → HMIP).
-- Test: buildModel da un DeviceNode canned → ModelDevice con canali e DP corretti; lookup dataPoint(channel,param).
+- `device.ts`/`channel.ts`: `ModelDevice {address, type, interfaceId, name?, rooms?, channels: ModelChannel[]; dataPoint(channelAddress, parameter)}`, `ModelChannel {address, index, type?, dataPoints: GenericDataPoint[]}`. Immutable after construction (the DPs have internal state but the structure is fixed).
+- `model-builder.ts`: `buildModel(devices: DeviceNode[], interfaceFamilyOf): ModelDevice[]` — for each DeviceNode create a ModelChannel per channel and a `GenericDataPoint` for each VALUES parameter that is readable or hasEvents (skip purely internal/SERVICE parameters if you want, but for the first release include all VALUES). `interfaceFamilyOf(interfaceId)` → 'HM' | 'HMIP' (heuristic: contains 'HmIP' → HMIP).
+- Test: buildModel from a canned DeviceNode → ModelDevice with correct channels and DPs; dataPoint(channel,param) lookup.
 - Commit: `feat(model): device/channel views + model builder`.
 
 ### Task 4: typed emitter + public events/types
-- `api/emitter.ts`: `TypedEventEmitter<TMap extends Record<string, unknown>>` con `on/off/once/emit` type-safe (wrappa `node:events` o implementazione propria). 
+- `api/emitter.ts`: `TypedEventEmitter<TMap extends Record<string, unknown>>` with type-safe `on/off/once/emit` (wraps `node:events` or its own implementation). 
 - `api/events.ts`: `HomematicEventMap`:
   - `valueChanged: { dpId: string; device: string; channel: string; parameter: string; value: HmValue; prevValue: HmValue; ts: number }`
   - `deviceAdded: { device: string }`, `deviceRemoved: { device: string }`
   - `connection: { interfaceId: string; state: string }`
   - `ready: void`, `error: Error`
 - `api/types.ts`: `HmDevice {address, type, name?, rooms?, channels: HmChannel[]}`, `HmChannel {address, index, dataPoints: HmDataPoint[]}`, `HmDataPoint {id, parameter, type, value, unit?, readable, writable, hasEvents, valueList?, min?, max?}`, `DataPointId = string`, `DataPointRef = string | { device: string; channel: number|string; parameter: string }`.
-- Test: emitter on/off/once/emit type-safe; once fires una sola volta.
+- Test: emitter on/off/once/emit type-safe; once fires only once.
 - Commit: `feat(api): typed event emitter + public types`.
 
 ### Task 5: Homematic facade
 - `api/homematic.ts`: `class Homematic`:
-  - constructor `{ host, interfaces: ('HmIP-RF'|'BidCos-RF'|...)[], credentials?, callback:{host,port}, cache?:{dir?,enabled?}, tls?, centralName? }` → costruisce internamente un `CentralUnit` (mappa le stringhe interfaccia a `Interface`).
-  - estende/contiene un `TypedEventEmitter<HomematicEventMap>` (esporre `on/off/once`).
-  - `async start()`: `central.start()`; costruisci il model da `central.registry`; **sottoscrivi** `central.eventBus`:
-    - `valueReceived` → trova il GenericDataPoint via dpk, `applyCcuValue`, se changed emetti `valueChanged` (con prev/next, device/channel/parameter estratti dal dpk).
-    - `deviceAdded`/`deviceRemoved` → aggiorna il model + emetti gli eventi pubblici.
-    - `connectionStateChanged` → emetti `connection`.
-    - `ready` → emetti `ready`.
-    - `systemError` → emetti `error`.
+  - constructor `{ host, interfaces: ('HmIP-RF'|'BidCos-RF'|...)[], credentials?, callback:{host,port}, cache?:{dir?,enabled?}, tls?, centralName? }` → builds a `CentralUnit` internally (maps the interface strings to `Interface`).
+  - extends/contains a `TypedEventEmitter<HomematicEventMap>` (expose `on/off/once`).
+  - `async start()`: `central.start()`; build the model from `central.registry`; **subscribe** to `central.eventBus`:
+    - `valueReceived` → find the GenericDataPoint via dpk, `applyCcuValue`, if changed emit `valueChanged` (with prev/next, device/channel/parameter extracted from the dpk).
+    - `deviceAdded`/`deviceRemoved` → update the model + emit the public events.
+    - `connectionStateChanged` → emit `connection`.
+    - `ready` → emit `ready`.
+    - `systemError` → emit `error`.
   - `async stop()`: `central.stop()`.
-  - `devices(): HmDevice[]` (snapshot pubblico immutabile dal model).
-  - `getValue(ref: DataPointRef): HmValue` (dal model/value cache).
-  - `async setValue(ref: DataPointRef, value: HmValue): Promise<void>`: risolvi il GenericDataPoint, `prepareWrite(value)` (valida+converte), poi `central.setValue(dpk, ccuValue)`.
-  - Risoluzione `DataPointRef`: stringa = dpId (uniqueId) → dpk; oggetto {device, channel, parameter} → costruisci channelAddress `device:channel` e dpk VALUES.
-  - Niente tipi interni esposti nelle firme pubbliche.
-- `src/index.ts`: esporta `Homematic`, `HmDevice`, `HmChannel`, `HmDataPoint`, `HmValue`, `DataPointRef`, i payload eventi. NON esporta transport/central.
-- Test (unit con un CentralUnit mockato/fake che espone eventBus+registry+setValue): start costruisce il model e sottoscrive; un `valueReceived` pubblicato sul bus → la facade emette `valueChanged` con prev/next corretti; `setValue({device,channel,parameter}, v)` valida e chiama `central.setValue` con il valore convertito; `setValue` fuori range → ValidationError (non chiama central).
+  - `devices(): HmDevice[]` (immutable public snapshot from the model).
+  - `getValue(ref: DataPointRef): HmValue` (from the model/value cache).
+  - `async setValue(ref: DataPointRef, value: HmValue): Promise<void>`: resolve the GenericDataPoint, `prepareWrite(value)` (validate+convert), then `central.setValue(dpk, ccuValue)`.
+  - `DataPointRef` resolution: string = dpId (uniqueId) → dpk; object {device, channel, parameter} → build channelAddress `device:channel` and a VALUES dpk.
+  - No internal types exposed in the public signatures.
+- `src/index.ts`: exports `Homematic`, `HmDevice`, `HmChannel`, `HmDataPoint`, `HmValue`, `DataPointRef`, the event payloads. Does NOT export transport/central.
+- Test (unit with a mocked/fake CentralUnit that exposes eventBus+registry+setValue): start builds the model and subscribes; a `valueReceived` published on the bus → the facade emits `valueChanged` with correct prev/next; `setValue({device,channel,parameter}, v)` validates and calls `central.setValue` with the converted value; `setValue` out of range → ValidationError (does not call central).
 - Commit: `feat(api): Homematic public facade (valueChanged stream + setValue)`.
 
-### Task 6: integrazione facade + (opz.) e2e
-- Integration test (con FakeCcu reale, riusando il wiring di Fase 2 ma attraverso la facade `Homematic`): `start()` → `devices()` popolato; FakeCcu `emitEvent` → la facade emette `valueChanged`; `setValue` raggiunge il FakeCcu; `stop()` pulito.
-- Aggiorna/aggiungi un e2e reale `tests/e2e/facade-smoke.test.ts` (gated HM_E2E): `new Homematic({...da env})`, `start()`, assert `devices().length>0` e che i DP abbiano metadati (type/readable), attesa breve `valueChanged`, `stop()`. READ-ONLY.
+### Task 6: facade integration + (opt.) e2e
+- Integration test (with the real FakeCcu, reusing the Phase 2 wiring but through the `Homematic` facade): `start()` → `devices()` populated; FakeCcu `emitEvent` → the facade emits `valueChanged`; `setValue` reaches the FakeCcu; clean `stop()`.
+- Update/add a real e2e `tests/e2e/facade-smoke.test.ts` (gated HM_E2E): `new Homematic({...from env})`, `start()`, assert `devices().length>0` and that the DPs have metadata (type/readable), short `valueChanged` wait, `stop()`. READ-ONLY.
 - Commit: `test(api): facade integration + e2e smoke`.
 
-### Task 7: Device configuration (paramset MASTER) sulla facade — per costruire una UI di config
-Obiettivo: esporre i building-block per una UI di configurazione dispositivi (tipo il pannello nativo di HA `homematicip_local`): device → canali → parametri MASTER con metadati per generare i form, + lettura/scrittura dei valori MASTER.
-- Il `model-builder`/`GenericDataPoint` riguardano i VALUES (stato live). La configurazione MASTER è SEPARATA: usa le descrizioni MASTER già in `ParamsetDescriptionCache` (scoperte in Fase 2) + `getParamset`/`putParamset` di `InterfaceClient`.
-- Tipi pubblici (`api/types.ts`): `HmConfigParam { parameter, type, min?, max?, default?, unit?, valueList?, flags, writable }` e `HmChannelConfig { channelAddress, params: HmConfigParam[] }`.
-- Sulla facade `Homematic`:
-  - `getConfigParams(channelAddress: string): HmConfigParam[]` — gli SPEC dei parametri MASTER del canale (dalla paramset cache via `central`), per generare i form. (Esporre dal CentralUnit un accessor read-only alla `ParamsetDescriptionCache` o un metodo `central.getParamsetSpec(interfaceId, channelAddress, 'MASTER')`.)
-  - `async getConfig(channelAddress: string): Promise<Record<string, HmValue>>` — valori MASTER correnti (delega a `central` → `InterfaceClient.getParamset(channelAddress, 'MASTER')`, converte via converter).
-  - `async setConfig(channelAddress: string, values: Record<string, HmValue>): Promise<void>` — valida ogni valore contro lo spec MASTER (range/enum/tipo, writable) e scrive in un solo `putParamset(channelAddress, 'MASTER', ccuValues)`.
-- Estendere `CentralUnit` con: `getParamsetSpec(interfaceId, channelAddress, paramsetKey): Record<string, ParameterData> | undefined` (read della paramset cache) e `getParamset(dpkOrChannel, paramsetKey)` / `putParamset(channelAddress, paramsetKey, values)` che instradano all'`InterfaceClient` giusto per interfaceId.
-- Test: `getConfigParams` ritorna gli spec MASTER del canale; `getConfig` legge e converte; `setConfig` valida (un valore fuori range → ValidationError, NON scrive) e su valori validi chiama `putParamset` una sola volta con i valori convertiti.
-- Commit: `feat(api): device configuration (MASTER paramset) sulla facade`.
+### Task 7: Device configuration (MASTER paramset) on the facade — to build a config UI
+Goal: expose the building blocks for a device configuration UI (like the native HA `homematicip_local` panel): device → channels → MASTER parameters with metadata to generate the forms, + read/write of the MASTER values.
+- The `model-builder`/`GenericDataPoint` concern the VALUES (live state). The MASTER configuration is SEPARATE: it uses the MASTER descriptions already in `ParamsetDescriptionCache` (discovered in Phase 2) + `InterfaceClient`'s `getParamset`/`putParamset`.
+- Public types (`api/types.ts`): `HmConfigParam { parameter, type, min?, max?, default?, unit?, valueList?, flags, writable }` and `HmChannelConfig { channelAddress, params: HmConfigParam[] }`.
+- On the `Homematic` facade:
+  - `getConfigParams(channelAddress: string): HmConfigParam[]` — the channel's MASTER parameter SPECs (from the paramset cache via `central`), to generate the forms. (Expose from CentralUnit a read-only accessor to the `ParamsetDescriptionCache` or a `central.getParamsetSpec(interfaceId, channelAddress, 'MASTER')` method.)
+  - `async getConfig(channelAddress: string): Promise<Record<string, HmValue>>` — current MASTER values (delegates to `central` → `InterfaceClient.getParamset(channelAddress, 'MASTER')`, converts via the converter).
+  - `async setConfig(channelAddress: string, values: Record<string, HmValue>): Promise<void>` — validates each value against the MASTER spec (range/enum/type, writable) and writes in a single `putParamset(channelAddress, 'MASTER', ccuValues)`.
+- Extend `CentralUnit` with: `getParamsetSpec(interfaceId, channelAddress, paramsetKey): Record<string, ParameterData> | undefined` (read from the paramset cache) and `getParamset(dpkOrChannel, paramsetKey)` / `putParamset(channelAddress, paramsetKey, values)` that route to the right `InterfaceClient` by interfaceId.
+- Test: `getConfigParams` returns the channel's MASTER specs; `getConfig` reads and converts; `setConfig` validates (an out-of-range value → ValidationError, does NOT write) and on valid values calls `putParamset` only once with the converted values.
+- Commit: `feat(api): device configuration (MASTER paramset) on the facade`.
 
-## Gate finale Fase 3
-`npm run lint && npm run format:check && npm run typecheck && npm run test:cov && npm run build` verde, coverage ≥ 80%. Bump `package.json` a `0.1.0` (primo rilascio funzionale) in un commit dedicato a fine fase (NON pubblicare su npm senza ok utente).
+## Phase 3 final gate
+`npm run lint && npm run format:check && npm run typecheck && npm run test:cov && npm run build` green, coverage ≥ 80%. Bump `package.json` to `0.1.0` (first functional release) in a dedicated commit at the end of the phase (do NOT publish to npm without user approval).
 
 ## Self-review
-- Copertura spec §5 (API pubblica) + §6 (model generic+hub): converter (T1), GenericDataPoint (T2), device/channel/builder (T3), emitter/events/types (T4), facade (T5), integrazione+e2e (T6). Hub (sysvar/programmi) e custom entities restano Fasi 4/5. ✅
-- Confine pubblico: `index.ts` esporta solo `api/` + tipi pubblici; transport/central interni. ✅
-- Stream globale unico `valueChanged` (no per-device), `setValue` validato. ✅
+- Spec §5 (public API) + §6 (generic model+hub) coverage: converter (T1), GenericDataPoint (T2), device/channel/builder (T3), emitter/events/types (T4), facade (T5), integration+e2e (T6). Hub (sysvar/programs) and custom entities remain Phases 4/5. ✅
+- Public boundary: `index.ts` exports only `api/` + public types; transport/central internal. ✅
+- Single global `valueChanged` stream (no per-device), validated `setValue`. ✅

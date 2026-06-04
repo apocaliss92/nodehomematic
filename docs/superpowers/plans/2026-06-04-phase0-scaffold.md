@@ -1,14 +1,14 @@
-# nodehomematic — Fase 0: Scaffold Implementation Plan
+# nodehomematic — Phase 0: Scaffold Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Creare lo scheletro del pacchetto npm `nodehomematic` (TypeScript strict, build, test, lint, CI, licenza, README) e il repository GitHub `apocaliss92/nodehomematic`, con una toolchain verde end-to-end.
+**Goal:** Create the skeleton of the `nodehomematic` npm package (strict TypeScript, build, test, lint, CI, license, README) and the GitHub repository `apocaliss92/nodehomematic`, with a green end-to-end toolchain.
 
-**Architecture:** Pacchetto npm singolo. TypeScript strict compilato in ESM+CJS via `tsup`. Test con `vitest`. Lint con ESLint flat config + `typescript-eslint` + Prettier. CI su GitHub Actions. La struttura cartelle (`transport/`, `central/`, `model/`, `api/`, `support/`) viene creata come stub vuoti con un `index.ts` pubblico minimale, così le fasi successive vi si innestano.
+**Architecture:** Single npm package. Strict TypeScript compiled to ESM+CJS via `tsup`. Tests with `vitest`. Lint with ESLint flat config + `typescript-eslint` + Prettier. CI on GitHub Actions. The folder structure (`transport/`, `central/`, `model/`, `api/`, `support/`) is created as empty stubs with a minimal public `index.ts`, so that the later phases plug into it.
 
 **Tech Stack:** Node 20+ (dev su 22), TypeScript 5, tsup, vitest, ESLint 9 (flat config), typescript-eslint, Prettier, GitHub Actions.
 
-**Working dir:** `/Users/gianlucaruocco/Documents/Git/nodehomematic` (git già inizializzato, branch `main`; contiene già `docs/` e `.gitignore`).
+**Working dir:** `/Users/gianlucaruocco/Documents/Git/nodehomematic` (git already initialized, branch `main`; already contains `docs/` and `.gitignore`).
 
 ---
 
@@ -17,7 +17,7 @@
 **Files:**
 - Create: `package.json`
 
-- [ ] **Step 1: Scrivere `package.json`**
+- [ ] **Step 1: Write `package.json`**
 
 ```json
 {
@@ -64,16 +64,16 @@
 }
 ```
 
-- [ ] **Step 2: Installare le dipendenze**
+- [ ] **Step 2: Install the dependencies**
 
 Run: `cd /Users/gianlucaruocco/Documents/Git/nodehomematic && npm install`
-Expected: crea `node_modules/` e `package-lock.json` senza errori (warning di peer-deps tollerati).
+Expected: creates `node_modules/` and `package-lock.json` without errors (peer-deps warnings tolerated).
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add package.json package-lock.json
-git commit -m "chore: package.json e dipendenze di base"
+git commit -m "chore: package.json and base dependencies"
 ```
 
 ---
@@ -83,7 +83,7 @@ git commit -m "chore: package.json e dipendenze di base"
 **Files:**
 - Create: `tsconfig.json`
 
-- [ ] **Step 1: Scrivere `tsconfig.json`**
+- [ ] **Step 1: Write `tsconfig.json`**
 
 ```json
 {
@@ -111,10 +111,10 @@ git commit -m "chore: package.json e dipendenze di base"
 }
 ```
 
-- [ ] **Step 2: Verificare che `tsc` non trovi errori su progetto vuoto**
+- [ ] **Step 2: Verify that `tsc` finds no errors on an empty project**
 
 Run: `npx tsc --noEmit`
-Expected: nessun output di errore (il src è ancora vuoto; aggiungiamo i file nei task successivi). Exit code 0. Se `src` è vuoto e `tsc` lamenta "No inputs were found", è atteso fino al Task 4 — proseguire.
+Expected: no error output (src is still empty; we add the files in the later tasks). Exit code 0. If `src` is empty and `tsc` complains "No inputs were found", that is expected until Task 4 — proceed.
 
 - [ ] **Step 3: Commit**
 
@@ -131,7 +131,7 @@ git commit -m "chore: tsconfig strict (NodeNext, noUncheckedIndexedAccess)"
 - Create: `tsup.config.ts`
 - Create: `vitest.config.ts`
 
-- [ ] **Step 1: Scrivere `tsup.config.ts`**
+- [ ] **Step 1: Write `tsup.config.ts`**
 
 ```ts
 import { defineConfig } from 'tsup';
@@ -149,7 +149,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 2: Scrivere `vitest.config.ts`**
+- [ ] **Step 2: Write `vitest.config.ts`**
 
 ```ts
 import { defineConfig } from 'vitest/config';
@@ -172,12 +172,12 @@ export default defineConfig({
 
 ```bash
 git add tsup.config.ts vitest.config.ts
-git commit -m "chore: config tsup (ESM+CJS) e vitest (coverage 80%)"
+git commit -m "chore: tsup config (ESM+CJS) and vitest (80% coverage)"
 ```
 
 ---
 
-### Task 4: Struttura src + entrypoint pubblico + primo modulo testabile
+### Task 4: src structure + public entrypoint + first testable module
 
 **Files:**
 - Create: `src/index.ts`
@@ -185,7 +185,7 @@ git commit -m "chore: config tsup (ESM+CJS) e vitest (coverage 80%)"
 - Create: `src/transport/.gitkeep`, `src/central/.gitkeep`, `src/model/.gitkeep`, `src/api/.gitkeep`
 - Test: `tests/unit/version.test.ts`
 
-- [ ] **Step 1: Scrivere il test che fallisce**
+- [ ] **Step 1: Write the failing test**
 
 `tests/unit/version.test.ts`:
 ```ts
@@ -193,27 +193,27 @@ import { describe, it, expect } from 'vitest';
 import { LIBRARY_NAME, isSupportedNodeVersion } from '../../src/support/version.js';
 
 describe('support/version', () => {
-  it('espone il nome libreria', () => {
+  it('exposes the library name', () => {
     expect(LIBRARY_NAME).toBe('nodehomematic');
   });
 
-  it('accetta Node >= 20', () => {
+  it('accepts Node >= 20', () => {
     expect(isSupportedNodeVersion('v20.0.0')).toBe(true);
     expect(isSupportedNodeVersion('v22.19.0')).toBe(true);
   });
 
-  it('rifiuta Node < 20', () => {
+  it('rejects Node < 20', () => {
     expect(isSupportedNodeVersion('v18.20.0')).toBe(false);
   });
 });
 ```
 
-- [ ] **Step 2: Eseguire il test per vederlo fallire**
+- [ ] **Step 2: Run the test to see it fail**
 
 Run: `npx vitest run tests/unit/version.test.ts`
 Expected: FAIL — `Cannot find module '../../src/support/version.js'`.
 
-- [ ] **Step 3: Implementare il modulo minimo**
+- [ ] **Step 3: Implement the minimal module**
 
 `src/support/version.ts`:
 ```ts
@@ -229,7 +229,7 @@ export function isSupportedNodeVersion(version: string): boolean {
 }
 ```
 
-- [ ] **Step 4: Creare l'entrypoint pubblico e gli stub di cartella**
+- [ ] **Step 4: Create the public entrypoint and the folder stubs**
 
 `src/index.ts`:
 ```ts
@@ -238,28 +238,28 @@ export function isSupportedNodeVersion(version: string): boolean {
 export { LIBRARY_NAME } from './support/version.js';
 ```
 
-Creare i marker delle cartelle a strati (verranno popolate nelle fasi successive):
+Create the markers for the layered folders (they will be populated in the later phases):
 ```bash
 mkdir -p src/transport src/central src/model src/api
 touch src/transport/.gitkeep src/central/.gitkeep src/model/.gitkeep src/api/.gitkeep
 ```
 
-- [ ] **Step 5: Eseguire test, typecheck e build**
+- [ ] **Step 5: Run test, typecheck and build**
 
 Run: `npx vitest run tests/unit/version.test.ts`
-Expected: PASS (3 test verdi).
+Expected: PASS (3 green tests).
 
 Run: `npx tsc --noEmit`
-Expected: nessun errore.
+Expected: no errors.
 
 Run: `npm run build`
-Expected: genera `dist/index.js`, `dist/index.cjs`, `dist/index.d.ts` senza errori.
+Expected: generates `dist/index.js`, `dist/index.cjs`, `dist/index.d.ts` without errors.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add src tests
-git commit -m "feat: scaffold src a strati + modulo version con test"
+git commit -m "feat: layered src scaffold + version module with tests"
 ```
 
 ---
@@ -271,7 +271,7 @@ git commit -m "feat: scaffold src a strati + modulo version con test"
 - Create: `.prettierrc.json`
 - Create: `.prettierignore`
 
-- [ ] **Step 1: Scrivere `.prettierrc.json`**
+- [ ] **Step 1: Write `.prettierrc.json`**
 
 ```json
 {
@@ -282,7 +282,7 @@ git commit -m "feat: scaffold src a strati + modulo version con test"
 }
 ```
 
-- [ ] **Step 2: Scrivere `.prettierignore`**
+- [ ] **Step 2: Write `.prettierignore`**
 
 ```
 dist
@@ -290,7 +290,7 @@ node_modules
 coverage
 ```
 
-- [ ] **Step 3: Scrivere `eslint.config.js`**
+- [ ] **Step 3: Write `eslint.config.js`**
 
 ```js
 import tseslint from 'typescript-eslint';
@@ -319,13 +319,13 @@ export default tseslint.config(
 );
 ```
 
-- [ ] **Step 4: Eseguire lint e format check**
+- [ ] **Step 4: Run lint and format check**
 
 Run: `npm run lint`
-Expected: nessun errore (0 problemi) sui file `src/` esistenti.
+Expected: no errors (0 problems) on the existing `src/` files.
 
 Run: `npm run format:check`
-Expected: tutti i file formattati correttamente; se segnala differenze, eseguire `npm run format` e ricontrollare.
+Expected: all files formatted correctly; if it reports differences, run `npm run format` and re-check.
 
 - [ ] **Step 5: Commit**
 
@@ -336,12 +336,12 @@ git commit -m "chore: ESLint flat config type-checked + Prettier"
 
 ---
 
-### Task 6: LICENSE (MIT, copyright preservato)
+### Task 6: LICENSE (MIT, copyright preserved)
 
 **Files:**
 - Create: `LICENSE`
 
-- [ ] **Step 1: Scrivere `LICENSE` MIT mantenendo il copyright originale del progetto sorgente**
+- [ ] **Step 1: Write the MIT `LICENSE` keeping the original copyright of the source project**
 
 ```
 MIT License
@@ -372,7 +372,7 @@ SOFTWARE.
 
 ```bash
 git add LICENSE
-git commit -m "docs: licenza MIT (copyright aiohomematic preservato + porting)"
+git commit -m "docs: MIT license (aiohomematic copyright preserved + port)"
 ```
 
 ---
@@ -382,36 +382,36 @@ git commit -m "docs: licenza MIT (copyright aiohomematic preservato + porting)"
 **Files:**
 - Create: `README.md`
 
-- [ ] **Step 1: Scrivere `README.md`**
+- [ ] **Step 1: Write `README.md`**
 
 ```markdown
 # nodehomematic
 
-Porting Node.js/TypeScript di [aiohomematic](https://github.com/sukramj/aiohomematic) — libreria asincrona per controllare e monitorare dispositivi Homematic / HomematicIP tramite **CCU3 / RaspberryMatic / OpenCCU**.
+Node.js/TypeScript port of [aiohomematic](https://github.com/sukramj/aiohomematic) — an asynchronous library to control and monitor Homematic / HomematicIP devices via **CCU3 / RaspberryMatic / OpenCCU**.
 
-> ⚠️ **Stato:** in sviluppo attivo (0.x). API in evoluzione fino alla 1.0.
+> ⚠️ **Status:** under active development (0.x). API evolving until 1.0.
 
-## Caratteristiche (roadmap)
+## Features (roadmap)
 
-- Connessione XML-RPC alle interfacce CCU (BidCos-RF, HmIP-RF, ...)
-- Client JSON-RPC verso la WebUI CCU (nomi, stanze, programmi, system variables)
-- Callback server per ricezione push degli eventi dalla CCU
-- Riconnessione automatica rock-solid (health-ping + re-init + re-sync)
-- Discovery automatica di device, canali e data point + cache persistente
-- API pubblica agnostica event-driven: stream globale `valueChanged` + `setValue`
-- Tipi custom (light, switch, cover, climate, lock, ...) — incrementali
+- XML-RPC connection to the CCU interfaces (BidCos-RF, HmIP-RF, ...)
+- JSON-RPC client to the CCU WebUI (names, rooms, programs, system variables)
+- Callback server to receive event push notifications from the CCU
+- Rock-solid automatic reconnection (health-ping + re-init + re-sync)
+- Automatic discovery of devices, channels and data points + persistent cache
+- Event-driven, system-agnostic public API: global `valueChanged` stream + `setValue`
+- Custom types (light, switch, cover, climate, lock, ...) — incremental
 
-## Requisiti
+## Requirements
 
 - Node.js >= 20
 
-## Installazione
+## Installation
 
 ```bash
 npm install nodehomematic
 ```
 
-## Uso (anteprima API target)
+## Usage (target API preview)
 
 ```ts
 import { Homematic } from 'nodehomematic';
@@ -427,18 +427,18 @@ hm.on('valueChanged', (e) => console.log(e.dpId, e.value));
 await hm.start();
 ```
 
-> Nota: la facade `Homematic` arriva nella Fase 3. Vedi `docs/superpowers/specs/` per il design.
+> Note: the `Homematic` facade arrives in Phase 3. See `docs/superpowers/specs/` for the design.
 
 ## Licenza
 
-MIT — porting di aiohomematic (copyright originale SukramJ, Daniel Perna preservato). Vedi `LICENSE`.
+MIT — port of aiohomematic (original copyright SukramJ, Daniel Perna preserved). See `LICENSE`.
 ```
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add README.md
-git commit -m "docs: README iniziale"
+git commit -m "docs: initial README"
 ```
 
 ---
@@ -448,7 +448,7 @@ git commit -m "docs: README iniziale"
 **Files:**
 - Create: `.github/workflows/ci.yml`
 
-- [ ] **Step 1: Scrivere `.github/workflows/ci.yml`**
+- [ ] **Step 1: Write `.github/workflows/ci.yml`**
 
 ```yaml
 name: CI
@@ -479,27 +479,27 @@ jobs:
       - run: npm run build
 ```
 
-- [ ] **Step 2: Verificare localmente l'intera pipeline**
+- [ ] **Step 2: Verify the whole pipeline locally**
 
 Run: `npm run lint && npm run format:check && npm run typecheck && npm run test:cov && npm run build`
-Expected: tutti i passi verdi; coverage >= 80% (al momento un solo modulo coperto al 100%).
+Expected: all steps green; coverage >= 80% (currently a single module covered at 100%).
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add .github/workflows/ci.yml
-git commit -m "ci: pipeline GitHub Actions (lint, typecheck, test, build) su Node 20/22"
+git commit -m "ci: GitHub Actions pipeline (lint, typecheck, test, build) on Node 20/22"
 ```
 
 ---
 
-### Task 9: Creare il repository GitHub e push
+### Task 9: Create the GitHub repository and push
 
-**Files:** nessuno (operazione remota).
+**Files:** none (remote operation).
 
-- [ ] **Step 1: Creare il repo remoto e fare push del branch main**
+- [ ] **Step 1: Create the remote repo and push the main branch**
 
-> Azione outward-facing: crea un repository pubblico sull'account `apocaliss92`. Confermare prima di eseguire.
+> Outward-facing action: creates a public repository on the `apocaliss92` account. Confirm before running.
 
 Run:
 ```bash
@@ -511,21 +511,21 @@ gh repo create apocaliss92/nodehomematic \
   --description "Node.js/TypeScript port of aiohomematic (Homematic/HomematicIP via CCU3/RaspberryMatic)" \
   --push
 ```
-Expected: il repo viene creato e il branch `main` viene pushato; `gh` stampa l'URL del repository.
+Expected: the repo is created and the `main` branch is pushed; `gh` prints the repository URL.
 
-- [ ] **Step 2: Verificare il remoto e lo stato CI**
+- [ ] **Step 2: Verify the remote and the CI status**
 
 Run: `gh repo view apocaliss92/nodehomematic --web` (apre il browser) oppure `gh run list --repo apocaliss92/nodehomematic --limit 1`
-Expected: il repository esiste; il workflow CI parte sul push e diventa verde.
+Expected: the repository exists; the CI workflow starts on push and turns green.
 
 ---
 
 ## Self-Review
 
-**Spec coverage (Fase 0 dello spec §8):** repo GitHub (Task 9), TS strict (Task 2), tsup (Task 3), vitest (Task 3+4), eslint+prettier (Task 5), CI Actions (Task 8), README (Task 7), LICENSE MIT con copyright preservato (Task 6, §9 spec), struttura cartelle a strati (Task 4). ✅ Tutte le voci della Fase 0 sono coperte.
+**Spec coverage (Phase 0 of the spec §8):** GitHub repo (Task 9), strict TS (Task 2), tsup (Task 3), vitest (Task 3+4), eslint+prettier (Task 5), CI Actions (Task 8), README (Task 7), MIT LICENSE with preserved copyright (Task 6, spec §9), layered folder structure (Task 4). ✅ All Phase 0 items are covered.
 
-**Placeholder scan:** nessun "TBD/TODO"; ogni step ha contenuto reale (config/codice completi). ✅
+**Placeholder scan:** no "TBD/TODO"; every step has real content (complete config/code). ✅
 
-**Type consistency:** `LIBRARY_NAME` e `isSupportedNodeVersion` definiti nel Task 4 e usati coerentemente nel test e in `index.ts`. ✅
+**Type consistency:** `LIBRARY_NAME` and `isSupportedNodeVersion` defined in Task 4 and used consistently in the test and in `index.ts`. ✅
 
-**Note:** le cartelle a strati sono create come `.gitkeep` vuote; verranno popolate dalle fasi 1–5, ognuna con il proprio piano spec→plan.
+**Note:** the layered folders are created as empty `.gitkeep`; they will be populated by phases 1–5, each with its own spec→plan.
