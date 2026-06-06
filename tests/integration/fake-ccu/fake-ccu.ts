@@ -405,6 +405,21 @@ export class FakeCcu {
     await postTo(reg.callbackUrl, body);
   }
 
+  /**
+   * Schedule the asynchronous PONG push a real CCU sends in response to a
+   * `ping(callerId)`: the callerId is echoed back verbatim as a CENTRAL/PONG
+   * event value. Fire-and-forget on the next microtask so the sync XML-RPC
+   * dispatch can return `true` first. No-op when no callback is registered or
+   * the callerId is not a string (defensive — a real ping carries a string).
+   */
+  private schedulePong(callerId: XmlRpcValue | undefined): void {
+    if (typeof callerId !== 'string') return;
+    if (this.registration === undefined) return;
+    queueMicrotask(() => {
+      void this.emitEvent('CENTRAL', 'PONG', callerId);
+    });
+  }
+
   private handleRequest(req: IncomingMessage, res: ServerResponse): void {
     const chunks: Buffer[] = [];
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -460,8 +475,12 @@ export class FakeCcu {
       case 'init':
         return this.handleInit(params);
       case 'ping':
-        // The CCU answers a ping with `true`; a real CCU would also push a
-        // `pong` event to the callback — not needed for these tests.
+        // The CCU answers a ping with `true` AND asynchronously pushes a PONG
+        // event back to the callback, echoing the caller-supplied callerId as
+        // the event value. We mirror that: fire-and-forget AFTER returning (the
+        // push is an async POST and this dispatch is sync), guarded so we only
+        // emit when a callback is registered.
+        this.schedulePong(params[0]);
         return true;
       case 'listDevices':
         return this.devices as unknown as XmlRpcValue;

@@ -755,11 +755,15 @@ export class CentralUnit {
 
   /** Ping + liveness probe for one interface. Returns true on a detected loss. */
   private async probeInterface(runtime: InterfaceRuntime): Promise<boolean> {
-    const token = `${runtime.pingSeq++}`;
+    // The token MUST be the exact callerId sent to the CCU: the CCU echoes it
+    // back verbatim as the PONG event's value, which the router reconciles
+    // against the recorded token. Recording the bare seq while sending
+    // `${interfaceId}#${seq}` would make every pong "unknown" → a false loss.
+    const token = `${runtime.interfaceId}#${runtime.pingSeq++}`;
     runtime.pingPong.handleSendPing(token);
     let pingOk = false;
     try {
-      pingOk = await runtime.client.ping(`${runtime.interfaceId}#${token}`);
+      pingOk = await runtime.client.ping(token);
     } catch {
       pingOk = false;
     }
