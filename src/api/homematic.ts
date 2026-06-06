@@ -343,6 +343,26 @@ export class Homematic {
     await this.#central.setValue(dp.dpk, ccu);
   }
 
+  /**
+   * Trigger a firmware update for a device by its address (e.g. `001B9D89A09163`).
+   *
+   * Resolves the interface owning the device (the same routing used by
+   * {@link Homematic.setValue}) and dispatches the standard XML-RPC
+   * `installFirmware(address)` command on it. The promise resolves once the CCU
+   * accepts the request — the actual flash runs asynchronously on the device and
+   * its progress is reflected later by the descriptor's `firmwareUpdateState`.
+   * Throws {@link ValidationError} for an unknown device, or a typed transport
+   * error (e.g. `ClientError`) if the CCU/interface rejects the call (which the
+   * caller can surface as "firmware update not supported").
+   */
+  public async installFirmware(deviceAddress: string): Promise<void> {
+    const device = this.#devicesByAddress.get(deviceAddress);
+    if (device === undefined) {
+      throw new ValidationError(`Unknown device "${deviceAddress}".`);
+    }
+    await this.#central.installFirmware(device.interfaceId, deviceAddress);
+  }
+
   // --- device configuration (MASTER paramset) -------------------------------
 
   /**
@@ -1047,6 +1067,14 @@ function toHmDevice(
     ...(device.name !== undefined ? { name: device.name } : {}),
     ...(rooms !== undefined ? { rooms } : {}),
     ...(functions !== undefined ? { functions } : {}),
+    ...(device.firmware !== undefined ? { firmware: device.firmware } : {}),
+    ...(device.availableFirmware !== undefined
+      ? { availableFirmware: device.availableFirmware }
+      : {}),
+    ...(device.updatable !== undefined ? { updatable: device.updatable } : {}),
+    ...(device.firmwareUpdateState !== undefined
+      ? { firmwareUpdateState: device.firmwareUpdateState }
+      : {}),
     channels,
   };
 }

@@ -68,6 +68,12 @@ export interface DeviceDescription {
   readonly FIRMWARE?: string;
   readonly AVAILABLE_FIRMWARE?: string;
   readonly FIRMWARE_UPDATE_STATE?: string;
+  /**
+   * Whether a firmware update is available/installable for this device. Real
+   * CCUs return this as the descriptor key `UPDATABLE` (boolean, serialised as
+   * 1/0). The legacy `FIRMWARE_UPDATABLE` alias is also accepted for tolerance.
+   */
+  readonly UPDATABLE?: boolean;
   readonly FIRMWARE_UPDATABLE?: boolean;
   readonly RX_MODE?: number;
   readonly AES_ACTIVE?: number;

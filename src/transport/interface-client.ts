@@ -264,6 +264,26 @@ export class InterfaceClient {
     });
   }
 
+  /**
+   * `installFirmware(address)` — trigger a firmware update for a device.
+   *
+   * TRANSPORT CHOICE: this is dispatched as a standard XML-RPC interface method
+   * on the interface that owns the device (the same channel used by
+   * `listDevices`/`setValue`). The CCU's BidCos-RF and HmIP-RF XML-RPC servers
+   * expose `installFirmware` directly; aiohomematic drives device firmware
+   * updates through the very same per-interface XML-RPC proxy. We wrap it in the
+   * write-retry policy (it is an idempotent "begin update" command). If a given
+   * interface does not implement it, the CCU answers with a `<fault>` which the
+   * client surfaces as a typed {@link ClientError} so callers can present a
+   * "not supported" message.
+   */
+  public async installFirmware(address: string): Promise<void> {
+    await withRetry(() => this.callGuarded('installFirmware', [address]), {
+      getFaultCode: defaultGetFaultCode,
+      ...this.retryOptions,
+    });
+  }
+
   /** `getInstallMode()` → seconds remaining. */
   public async getInstallMode(): Promise<number> {
     const result = await this.callGuarded('getInstallMode', []);

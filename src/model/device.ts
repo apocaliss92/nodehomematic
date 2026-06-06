@@ -16,6 +16,14 @@ export interface ModelDeviceInit {
   readonly name?: string;
   readonly rooms?: readonly string[];
   readonly functions?: readonly string[];
+  /** Installed firmware version, e.g. `1.18.24`. */
+  readonly firmware?: string;
+  /** Latest firmware available for this device, e.g. `1.18.24`. */
+  readonly availableFirmware?: string;
+  /** Whether a firmware update can be installed for this device. */
+  readonly updatable?: boolean;
+  /** Firmware update lifecycle state, e.g. `UP_TO_DATE`. */
+  readonly firmwareUpdateState?: string;
   readonly channels: readonly ModelChannel[];
 }
 
@@ -26,6 +34,10 @@ export class ModelDevice {
   public readonly name?: string;
   public readonly rooms?: readonly string[];
   public readonly functions?: readonly string[];
+  public readonly firmware?: string;
+  public readonly availableFirmware?: string;
+  public readonly updatable?: boolean;
+  public readonly firmwareUpdateState?: string;
   public readonly channels: readonly ModelChannel[];
 
   readonly #byAddress: ReadonlyMap<string, ModelChannel>;
@@ -42,6 +54,18 @@ export class ModelDevice {
     }
     if (init.functions !== undefined) {
       this.functions = init.functions;
+    }
+    if (init.firmware !== undefined) {
+      this.firmware = init.firmware;
+    }
+    if (init.availableFirmware !== undefined) {
+      this.availableFirmware = init.availableFirmware;
+    }
+    if (init.updatable !== undefined) {
+      this.updatable = init.updatable;
+    }
+    if (init.firmwareUpdateState !== undefined) {
+      this.firmwareUpdateState = init.firmwareUpdateState;
     }
     this.channels = init.channels;
     this.#byAddress = new Map(init.channels.map((ch) => [ch.address, ch]));

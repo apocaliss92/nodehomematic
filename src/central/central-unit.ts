@@ -348,6 +348,15 @@ export class CentralUnit {
     await client.putParamset(channelAddress, paramsetKey as ParamsetKey, values);
   }
 
+  /**
+   * Trigger a firmware update for a device, routing to the right
+   * {@link InterfaceClient} by `interfaceId`. Throws if the interface is unknown.
+   */
+  public async installFirmware(interfaceId: string, deviceAddress: string): Promise<void> {
+    const client = this.clientFor(interfaceId);
+    await client.installFirmware(deviceAddress);
+  }
+
   /** Resolve the {@link InterfaceClient} bound to `interfaceId`, or throw. */
   private clientFor(interfaceId: string): InterfaceClient {
     const runtime = this.runtimes.get(interfaceId);

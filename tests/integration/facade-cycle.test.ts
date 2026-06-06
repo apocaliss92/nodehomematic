@@ -104,6 +104,24 @@ describe('facade cycle (fake CCU, real central + transport modules)', () => {
     expect(state.readable).toBe(true);
   });
 
+  it('surfaces the device descriptor firmware fields on devices()', () => {
+    const device = hm.devices()[0]!;
+    expect(device.firmware).toBe('1.18.24');
+    expect(device.availableFirmware).toBe('1.18.24');
+    expect(device.updatable).toBe(true);
+    expect(device.firmwareUpdateState).toBe('UP_TO_DATE');
+  });
+
+  it('installFirmware dispatches the XML-RPC command to the CCU', async () => {
+    await hm.installFirmware('VCU0000001');
+    expect(fakeCcu.didInstallFirmware('VCU0000001')).toBe(true);
+  });
+
+  it('installFirmware rejects an unknown device before hitting the wire', async () => {
+    await expect(hm.installFirmware('NOPE')).rejects.toThrow(/Unknown device/);
+    expect(fakeCcu.didInstallFirmware('NOPE')).toBe(false);
+  });
+
   it('reflects seeded initial values in getValue() right after start (no push)', async () => {
     // The shared fakeCcu/storage are recreated per test in beforeEach, but this
     // test needs the value stored BEFORE start(). Build a dedicated facade here.

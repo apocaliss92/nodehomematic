@@ -243,6 +243,10 @@ function buildDevice(
   const rooms = details?.roomsByAddress.get(address);
   const functions = details?.functionsByAddress.get(address);
 
+  // Real CCUs key device-update availability as `UPDATABLE`; tolerate the
+  // legacy `FIRMWARE_UPDATABLE` alias too. Both are booleans (XML-RPC 1/0).
+  const updatable = device.UPDATABLE ?? device.FIRMWARE_UPDATABLE;
+
   const node: DeviceNode = {
     address,
     type: device.TYPE,
@@ -250,6 +254,13 @@ function buildDevice(
     channels,
     raw: device,
     ...(device.FIRMWARE !== undefined ? { firmware: device.FIRMWARE } : {}),
+    ...(device.AVAILABLE_FIRMWARE !== undefined
+      ? { availableFirmware: device.AVAILABLE_FIRMWARE }
+      : {}),
+    ...(updatable !== undefined ? { updatable } : {}),
+    ...(device.FIRMWARE_UPDATE_STATE !== undefined
+      ? { firmwareUpdateState: device.FIRMWARE_UPDATE_STATE }
+      : {}),
     ...(name !== undefined ? { name } : {}),
     ...(rooms !== undefined && rooms.length > 0 ? { rooms } : {}),
     ...(functions !== undefined && functions.length > 0 ? { functions } : {}),

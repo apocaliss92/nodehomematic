@@ -79,7 +79,11 @@ const CANNED_DEVICES: readonly DeviceDescription[] = [
   {
     ADDRESS: 'VCU0000001',
     TYPE: 'HmIP-SWDO',
-    FIRMWARE: '1.0.0',
+    // Mirror a real CCU device descriptor's firmware fields.
+    FIRMWARE: '1.18.24',
+    AVAILABLE_FIRMWARE: '1.18.24',
+    UPDATABLE: true,
+    FIRMWARE_UPDATE_STATE: 'UP_TO_DATE',
     PARAMSETS: ['MASTER'],
     CHILDREN: ['VCU0000001:0', 'VCU0000001:1'],
   },
@@ -209,6 +213,7 @@ const XML_RPC_METHODS: readonly string[] = [
   'getValue',
   'setValue',
   'putParamset',
+  'installFirmware',
   'getVersion',
   'system.listMethods',
 ];
@@ -229,6 +234,8 @@ export class FakeCcu {
   private readonly sysvarWrites = new Map<string, unknown>();
   /** Program ids executed, in order. */
   private readonly programExecutions: string[] = [];
+  /** Device addresses passed to `installFirmware`, in order. */
+  private readonly firmwareInstalls: string[] = [];
   /** When true, every XML-RPC request is refused (simulated outage). */
   private down = false;
   /** When true, `system.listMethods` faults (forces the getVersion fallback). */
@@ -330,6 +337,11 @@ export class FakeCcu {
   /** True if a program with the given id was executed. */
   public didExecuteProgram(id: string): boolean {
     return this.programExecutions.includes(id);
+  }
+
+  /** True if `installFirmware` was called for the given device address. */
+  public didInstallFirmware(deviceAddress: string): boolean {
+    return this.firmwareInstalls.includes(deviceAddress);
   }
 
   /**
@@ -496,6 +508,8 @@ export class FakeCcu {
         return this.handleSetValue(params);
       case 'putParamset':
         return this.handlePutParamset(params);
+      case 'installFirmware':
+        return this.handleInstallFirmware(params);
       case 'getVersion':
         return '3.75.7';
       case 'system.listMethods':
@@ -567,6 +581,13 @@ export class FakeCcu {
         this.values.set(valueKey(channelAddress, parameter), value);
       }
     }
+    return '';
+  }
+
+  private handleInstallFirmware(params: readonly XmlRpcValue[]): XmlRpcValue {
+    const address = asString(params[0], 'installFirmware address');
+    this.firmwareInstalls.push(address);
+    // The CCU acks installFirmware with an empty string (like init/setValue).
     return '';
   }
 

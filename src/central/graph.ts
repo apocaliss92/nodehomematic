@@ -90,7 +90,14 @@ export interface DeviceNode {
   readonly address: string;
   readonly type: string;
   readonly interfaceId: string;
+  /** Installed firmware version, e.g. `1.18.24` (descriptor `FIRMWARE`). */
   readonly firmware?: string;
+  /** Latest firmware the CCU knows of (descriptor `AVAILABLE_FIRMWARE`). */
+  readonly availableFirmware?: string;
+  /** Whether a firmware update can be installed (descriptor `UPDATABLE`). */
+  readonly updatable?: boolean;
+  /** Update lifecycle state, e.g. `UP_TO_DATE` (descriptor `FIRMWARE_UPDATE_STATE`). */
+  readonly firmwareUpdateState?: string;
   readonly name?: string;
   readonly rooms?: readonly string[];
   readonly functions?: readonly string[];

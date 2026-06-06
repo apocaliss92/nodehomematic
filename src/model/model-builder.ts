@@ -65,6 +65,12 @@ export function buildDevice(node: DeviceNode): ModelDevice {
     ...(node.name !== undefined ? { name: node.name } : {}),
     ...(node.rooms !== undefined ? { rooms: node.rooms } : {}),
     ...(node.functions !== undefined ? { functions: node.functions } : {}),
+    ...(node.firmware !== undefined ? { firmware: node.firmware } : {}),
+    ...(node.availableFirmware !== undefined ? { availableFirmware: node.availableFirmware } : {}),
+    ...(node.updatable !== undefined ? { updatable: node.updatable } : {}),
+    ...(node.firmwareUpdateState !== undefined
+      ? { firmwareUpdateState: node.firmwareUpdateState }
+      : {}),
     channels,
   });
 }

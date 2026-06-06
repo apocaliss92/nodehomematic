@@ -41,6 +41,14 @@ export interface HmDevice {
   readonly name?: string;
   readonly rooms?: readonly string[];
   readonly functions?: readonly string[];
+  /** Installed firmware version, e.g. `1.18.24` (CCU descriptor `FIRMWARE`). */
+  readonly firmware?: string;
+  /** Latest firmware available, e.g. `1.18.24` (CCU descriptor `AVAILABLE_FIRMWARE`). */
+  readonly availableFirmware?: string;
+  /** Whether a firmware update can be installed (CCU descriptor `UPDATABLE`). */
+  readonly updatable?: boolean;
+  /** Firmware update lifecycle state, e.g. `UP_TO_DATE` (CCU descriptor `FIRMWARE_UPDATE_STATE`). */
+  readonly firmwareUpdateState?: string;
   readonly channels: readonly HmChannel[];
 }
 
