@@ -129,7 +129,9 @@ describe('CallbackRouter', () => {
   });
 
   it('reconciles a PONG event with the ping/pong tracker (no value published)', async () => {
-    h.pingPong.handleSendPing('tok-1');
+    // Our own ping tokens are `${interfaceId}#${seq}`; only those reconcile.
+    const ownToken = `${INTERFACE_ID}#1`;
+    h.pingPong.handleSendPing(ownToken);
     expect(h.pingPong.pendingCount).toBe(1);
 
     await h.router.route({
@@ -137,10 +139,31 @@ describe('CallbackRouter', () => {
       interfaceId: INTERFACE_ID,
       channelAddress: 'CENTRAL',
       parameter: PONG_PARAMETER,
-      value: 'tok-1',
+      value: ownToken,
     });
 
     expect(h.pingPong.pendingCount).toBe(0);
+    expect(h.events.some((e) => e.type === 'valueReceived')).toBe(false);
+  });
+
+  it('ignores a FOREIGN PONG whose token is not ours (no reconcile, no unknown)', async () => {
+    // The CCU broadcasts every client's PONG to all callbacks. A foreign token
+    // (another central, e.g. Home Assistant) must NOT reconcile our pending
+    // ping nor pollute the unknown bucket that drives the mismatch detector.
+    h.pingPong.handleSendPing(`${INTERFACE_ID}#1`);
+    expect(h.pingPong.pendingCount).toBe(1);
+
+    await h.router.route({
+      type: 'event',
+      interfaceId: INTERFACE_ID,
+      channelAddress: 'CENTRAL',
+      parameter: PONG_PARAMETER,
+      value: 'Casa-HmIP-RF#06.06.2026 10:27:59',
+    });
+
+    // Pending ping untouched, foreign pong dropped (not counted as unknown).
+    expect(h.pingPong.pendingCount).toBe(1);
+    expect(h.pingPong.unknownCount).toBe(0);
     expect(h.events.some((e) => e.type === 'valueReceived')).toBe(false);
   });
 

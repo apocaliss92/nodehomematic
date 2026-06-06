@@ -105,4 +105,67 @@ describe('central ping/pong stability (fake CCU echoes pongs)', () => {
     expect(connStates).not.toContain('FAILED');
     expect(connStates[connStates.length - 1]).toBe('CONNECTED');
   });
+
+  it('ignores FOREIGN pongs from other CCU clients (HA coexistence) and stays CONNECTED', async () => {
+    const jsonClient = new JsonRpcClient({ url: fakeCcu.jsonRpcUrl });
+    central = new CentralUnit({
+      centralName: CENTRAL_NAME,
+      host: HOST,
+      interfaces: [Interface.HMIP_RF],
+      credentials: { username: USERNAME, password: PASSWORD },
+      callback: { host: HOST, port: 0 },
+      storageBackend: storage,
+      jsonClient,
+      makeInterfaceClient: (iface) =>
+        new InterfaceClient({
+          centralName: CENTRAL_NAME,
+          interface: iface,
+          host: HOST,
+          port: fakeCcu.port,
+          callbackUrlProvider: () => `http://${HOST}:${central.callbackPort}`,
+        }),
+      timings: { connectionCheckMs: 3_600_000, valueRefreshMs: 3_600_000 },
+      recoverySleep: () => Promise.resolve(),
+      tcpProbe: () => Promise.resolve(true),
+    });
+
+    const stages: RecoveryStage[] = [];
+    central.eventBus.subscribe({
+      type: 'recoveryStageChanged',
+      handler: (event) => void stages.push(event.stage as RecoveryStage),
+    });
+    const connStates: string[] = [];
+    central.eventBus.subscribe({
+      type: 'connectionStateChanged',
+      handler: (event) => void connStates.push(event.state),
+    });
+
+    await central.start();
+    expect(fakeCcu.lastRegistration?.interfaceId).toBe(INTERFACE_ID);
+
+    // A real CCU broadcasts every client's PONG to ALL registered callbacks.
+    // Inject FOREIGN pongs (another central — e.g. Home Assistant — pinging the
+    // same CCU) whose token never matches ours. Without the routeEvent filter
+    // these land in the "unknown" bucket; past the mismatch threshold the
+    // interface is wrongly declared lost → endless RECONNECTING. With the
+    // filter they are ignored and the interface stays healthy.
+    const foreignPongs = DEFAULT_PING_PONG_MISMATCH_COUNT + 10;
+    const passes = DEFAULT_PING_PONG_MISMATCH_COUNT + 10;
+    for (let i = 0; i < passes; i += 1) {
+      // Inject a foreign pong before each healthy connection-check pass so the
+      // unknown bucket would accumulate well past the threshold if unfiltered.
+      if (i < foreignPongs) {
+        await fakeCcu.emitEvent('CENTRAL:0', 'PONG', `Casa-HmIP-RF#06.06.2026 10:27:5${i}`);
+        await flush();
+      }
+      await central.connectionCheck();
+      await flush();
+    }
+
+    // Foreign pongs were ignored: no mismatch, no recovery, still CONNECTED.
+    expect(stages).not.toContain(RecoveryStage.RECONNECTING);
+    expect(connStates).not.toContain('RECONNECTING');
+    expect(connStates).not.toContain('FAILED');
+    expect(connStates[connStates.length - 1]).toBe('CONNECTED');
+  });
 });

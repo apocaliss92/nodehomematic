@@ -125,7 +125,15 @@ export class CallbackRouter {
     // treating it as a data point value.
     if (parameter === PONG_PARAMETER) {
       const tracker = this.pingPongFor(interfaceId);
-      if (tracker !== undefined && typeof value === 'string') {
+      // The CCU broadcasts PONGs to EVERY registered client; only reconcile pongs
+      // whose token is ours (`${interfaceId}#<seq>`). Foreign clients' pongs
+      // (e.g. another central pinging the same CCU) are ignored so they don't
+      // pollute the mismatch tracker and trigger spurious reconnects.
+      if (
+        tracker !== undefined &&
+        typeof value === 'string' &&
+        value.startsWith(`${interfaceId}#`)
+      ) {
         tracker.handleReceivedPong(value);
       }
       return;
