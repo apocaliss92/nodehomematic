@@ -49,6 +49,40 @@ describe('buildCustomEntities', () => {
     expect(entities[0]).toBeInstanceOf(SwitchEntity);
   });
 
+  it('builds TWO SwitchEntity for an HmIP-BS2 (dual brand-switch actuator, channels 4 and 8)', () => {
+    // Live layout (verified on a real CCU): ch1-2 KEY_TRANSCEIVER, ch3/ch7
+    // SWITCH_TRANSMITTER read-back, ch4-6/ch8-10 SWITCH_VIRTUAL_RECEIVER —
+    // one relay per group, primary = the first VIRTUAL_RECEIVER (4 and 8).
+    const state4 = makeDp('VCU0000005:4', 'STATE', ParameterType.BOOL);
+    const state8 = makeDp('VCU0000005:8', 'STATE', ParameterType.BOOL);
+    const device = new ModelDevice({
+      address: 'VCU0000005',
+      type: 'HmIP-BS2',
+      interfaceId: INTERFACE_ID,
+      channels: [
+        new ModelChannel({ address: 'VCU0000005:4', index: 4, dataPoints: [state4] }),
+        new ModelChannel({ address: 'VCU0000005:8', index: 8, dataPoints: [state8] }),
+      ],
+    });
+    const { writer, calls } = recordingWriter();
+    const entities = buildCustomEntities(device, writer);
+
+    expect(entities).toHaveLength(2);
+    expect(entities.every((e) => e instanceof SwitchEntity)).toBe(true);
+    expect(entities.map((e) => e.primaryChannelAddress)).toEqual([
+      'VCU0000005:4',
+      'VCU0000005:8',
+    ]);
+
+    // The two relays are independent: each entity reads and writes ITS channel.
+    const [relay1, relay2] = entities as [SwitchEntity, SwitchEntity];
+    state8.applyCcuValue(true, 1);
+    expect(relay1.isOn).toBe(false);
+    expect(relay2.isOn).toBe(true);
+    void relay1.turnOn();
+    expect(calls).toEqual([{ channelAddress: 'VCU0000005:4', parameter: 'STATE', value: true }]);
+  });
+
   it('returns [] for an unregistered device type', () => {
     const ch = new ModelChannel({ address: 'VCU0000003:1', index: 1, dataPoints: [] });
     const device = new ModelDevice({

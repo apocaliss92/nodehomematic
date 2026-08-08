@@ -27,6 +27,16 @@ deviceProfileRegistry.register('HmIP-BSM', {
   channels: [4],
 });
 
+// HmIP-BS2: dual brand-switch actuator. Live layout (real CCU): ch1-2
+// KEY_TRANSCEIVER, ch3/ch7 SWITCH_TRANSMITTER read-back, ch4-6/ch8-10
+// SWITCH_VIRTUAL_RECEIVER — one relay per group, primary = the first
+// VIRTUAL_RECEIVER of each (4 and 8).
+deviceProfileRegistry.register('HmIP-BS2', {
+  entityClass: SwitchEntity,
+  profile: DeviceProfile.IP_SWITCH,
+  channels: [4, 8],
+});
+
 deviceProfileRegistry.register('HM-LC-Sw', {
   entityClass: SwitchEntity,
   profile: DeviceProfile.RF_SWITCH,
