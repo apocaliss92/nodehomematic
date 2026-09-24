@@ -45,5 +45,26 @@ export interface FieldMapping {
   readonly field: Field;
   readonly parameter: string;
   readonly visible?: boolean;
+  /** RELATIVE channel offset the field is bound to. This is the COMMAND
+   *  binding: writes always go here. */
   readonly channelOffset?: number;
+  /**
+   * RELATIVE channel offset the field is READ from, when that is not where it
+   * is commanded.
+   *
+   * Most fields are one data point — you read it and you write it. A cover is
+   * not. Measured on a live CCU, HmIP-BROLL `00111BE992A8E5`:
+   *
+   *   :3 SHUTTER_TRANSMITTER       LEVEL 0.475  R-E   ← where it IS
+   *   :4 SHUTTER_VIRTUAL_RECEIVER  LEVEL 1.0    RWE   ← where you COMMAND
+   *
+   * The transmitter reports the device's own position and REFUSES writes; the
+   * virtual receiver is the link/group target and holds the last commanded
+   * extreme. Binding both to the receiver reports 0 or 100 and nothing
+   * between, and is plainly wrong whenever the shutter rests part-way — 100
+   * while the slat sat at 47.5 %.
+   *
+   * Absent ⇒ read and write are the same data point, exactly as before.
+   */
+  readonly readChannelOffset?: number;
 }

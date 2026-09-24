@@ -31,6 +31,7 @@ function resolveFields(
   mappings: readonly FieldMapping[],
   defaultOffset: number,
   target: Map<Field, GenericDataPoint>,
+  readTarget: Map<Field, GenericDataPoint>,
 ): void {
   for (const mapping of mappings) {
     const offset = mapping.channelOffset ?? defaultOffset;
@@ -38,6 +39,16 @@ function resolveFields(
     const dp = device.dataPoint(address, mapping.parameter);
     if (dp !== undefined) {
       target.set(mapping.field, dp);
+    }
+    // A field READ somewhere else than it is commanded (see
+    // `FieldMapping.readChannelOffset`). Resolved independently: a device
+    // whose transmitter channel is missing still gets its command binding,
+    // and vice versa — one absent half must not cost the other.
+    if (mapping.readChannelOffset === undefined) continue;
+    const readAddress = channelAddress(device.address, baseChannel + mapping.readChannelOffset);
+    const readDp = device.dataPoint(readAddress, mapping.parameter);
+    if (readDp !== undefined) {
+      readTarget.set(mapping.field, readDp);
     }
   }
 }
@@ -47,19 +58,20 @@ function buildDataPoints(
   device: ModelDevice,
   baseChannel: number,
   profileConfig: ChannelGroupConfig,
-): Map<Field, GenericDataPoint> {
+): { dataPoints: Map<Field, GenericDataPoint>; readDataPoints: Map<Field, GenericDataPoint> } {
   const dataPoints = new Map<Field, GenericDataPoint>();
+  const readDataPoints = new Map<Field, GenericDataPoint>();
 
-  resolveFields(device, baseChannel, profileConfig.fields, 0, dataPoints);
+  resolveFields(device, baseChannel, profileConfig.fields, 0, dataPoints, readDataPoints);
 
   if (profileConfig.channelFields !== undefined) {
     for (const [offsetKey, mappings] of Object.entries(profileConfig.channelFields)) {
       const offset = Number(offsetKey);
-      resolveFields(device, baseChannel, mappings, offset, dataPoints);
+      resolveFields(device, baseChannel, mappings, offset, dataPoints, readDataPoints);
     }
   }
 
-  return dataPoints;
+  return { dataPoints, readDataPoints };
 }
 
 /** Build all custom entities declared for `device`, wired to `writer`. */
@@ -75,7 +87,7 @@ export function buildCustomEntities(
     const primaryOffset = profileConfig.primaryChannel ?? 0;
 
     for (const baseChannel of config.channels) {
-      const dataPoints = buildDataPoints(device, baseChannel, profileConfig);
+      const { dataPoints, readDataPoints } = buildDataPoints(device, baseChannel, profileConfig);
       if (dataPoints.size === 0) {
         continue;
       }
@@ -86,6 +98,7 @@ export function buildCustomEntities(
           primaryChannelAddress,
           type: device.type,
           dataPoints,
+          readDataPoints,
           writer,
         }),
       );

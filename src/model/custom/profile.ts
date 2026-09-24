@@ -116,12 +116,31 @@ export const PROFILE_CONFIGS: Partial<Record<DeviceProfile, ChannelGroupConfig>>
   // position (0..100) maps to LEVEL; STOP is an action; DIRECTION reports travel.
   // The DIRECTION field maps to ACTIVITY_STATE on HmIP and DIRECTION on RF, so
   // only the parameter string differs between the IP and RF profiles.
+  // HmIP splits a cover across two channels and the difference is not
+  // cosmetic. Measured on a live CCU, HmIP-BROLL `00111BE992A8E5`:
+  //
+  //   :3 SHUTTER_TRANSMITTER       LEVEL 0.475  R-E   ← where the cover IS
+  //   :4 SHUTTER_VIRTUAL_RECEIVER  LEVEL 1.0    RWE   ← where you COMMAND it
+  //
+  // The transmitter is the actuator reporting itself, and its LEVEL refuses
+  // writes. The virtual receivers (:4, :5, :6) are link/group targets holding
+  // the last commanded extreme. Reading the receiver — which this profile used
+  // to do — gives 0 or 100 and nothing between, and is simply wrong whenever
+  // the cover rests part-way: it read 100 with the slat at 47.5 %.
+  //
+  // `readChannelOffset: -1` is that one channel down, relative to the
+  // registered base (4 → 3). Writes stay where the CCU accepts them.
   [DeviceProfile.IP_COVER]: {
     primaryChannel: 0,
     fields: [
-      { field: Field.LEVEL, parameter: 'LEVEL', visible: true },
+      { field: Field.LEVEL, parameter: 'LEVEL', visible: true, readChannelOffset: -1 },
       { field: Field.STOP, parameter: 'STOP' },
-      { field: Field.DIRECTION, parameter: 'ACTIVITY_STATE', visible: true },
+      {
+        field: Field.DIRECTION,
+        parameter: 'ACTIVITY_STATE',
+        visible: true,
+        readChannelOffset: -1,
+      },
     ],
   },
   [DeviceProfile.RF_COVER]: {
@@ -134,13 +153,20 @@ export const PROFILE_CONFIGS: Partial<Record<DeviceProfile, ChannelGroupConfig>>
   },
   // Blind extends cover with slat tilt (LEVEL_2). HmIP blinds carry both LEVEL
   // and LEVEL_2 on the same combined channel.
+  // Same split as IP_COVER — see there. A blind's slat tilt (`LEVEL_2`) lives
+  // on the transmitter beside its position, for the same reason.
   [DeviceProfile.IP_BLIND]: {
     primaryChannel: 0,
     fields: [
-      { field: Field.LEVEL, parameter: 'LEVEL', visible: true },
-      { field: Field.LEVEL_2, parameter: 'LEVEL_2', visible: true },
+      { field: Field.LEVEL, parameter: 'LEVEL', visible: true, readChannelOffset: -1 },
+      { field: Field.LEVEL_2, parameter: 'LEVEL_2', visible: true, readChannelOffset: -1 },
       { field: Field.STOP, parameter: 'STOP' },
-      { field: Field.DIRECTION, parameter: 'ACTIVITY_STATE', visible: true },
+      {
+        field: Field.DIRECTION,
+        parameter: 'ACTIVITY_STATE',
+        visible: true,
+        readChannelOffset: -1,
+      },
     ],
   },
 

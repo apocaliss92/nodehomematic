@@ -13,10 +13,38 @@ import { CustomEntity } from './base.js';
 import { Field } from './fields.js';
 import { levelToPosition, positionToLevel } from './helpers.js';
 
-/** DIRECTION value reported while the cover is opening. */
-const DIRECTION_UP = 'UP';
-/** DIRECTION value reported while the cover is closing. */
-const DIRECTION_DOWN = 'DOWN';
+/**
+ * What a cover's travel data point says.
+ *
+ * `stable` and `unknown` are deliberately NOT the same answer. HmIP's
+ * `ACTIVITY_STATE` carries both and means different things by them — measured
+ * on a live CCU, channel 4 of an HmIP-BROLL:
+ *
+ *     ACTIVITY_STATE  TYPE=ENUM  VALUE_LIST = UNKNOWN|UP|DOWN|STABLE
+ *
+ * `STABLE` is "it has come to rest"; `UNKNOWN` is the parameter's DEFAULT and
+ * means the CCU has no opinion yet. A consumer that folds the two together
+ * ends a move on a report that never claimed it ended.
+ */
+export type CoverTravel = 'opening' | 'closing' | 'stable' | 'unknown';
+
+/**
+ * The travel members, by NAME, across both families.
+ *
+ * Matched by name rather than by index because the two value lists differ in
+ * their MEMBERS and not merely their order: RF `DIRECTION` is
+ * `NONE|UP|DOWN|UNDEFINED`, HmIP `ACTIVITY_STATE` is `UNKNOWN|UP|DOWN|STABLE`.
+ * An index mapping would be a guess about a list that is right there in the
+ * data point's own spec.
+ */
+const TRAVEL_BY_NAME: Readonly<Record<string, CoverTravel>> = {
+  UP: 'opening',
+  DOWN: 'closing',
+  STABLE: 'stable',
+  NONE: 'stable',
+  UNKNOWN: 'unknown',
+  UNDEFINED: 'unknown',
+};
 
 export class CoverEntity extends CustomEntity {
   public readonly kind: string = 'cover';
@@ -27,19 +55,50 @@ export class CoverEntity extends CustomEntity {
     return level === null ? null : levelToPosition(level);
   }
 
-  /** True when the cover is fully closed (LEVEL 0). */
+  /**
+   * True when the cover is fully closed (LEVEL 0).
+   *
+   * `false` here covers BOTH "open" and "LEVEL has not been read yet" — check
+   * {@link currentPosition} for `null` to tell them apart. Kept as a plain
+   * boolean because narrowing it would change every caller's type.
+   */
   public get isClosed(): boolean {
     return this.level === 0;
   }
 
-  /** True while the cover is travelling open (DIRECTION 'UP'). */
-  public get isOpening(): boolean {
-    return this.dp(Field.DIRECTION)?.value === DIRECTION_UP;
+  /**
+   * What the cover is doing, from its travel data point.
+   *
+   * The data point is `ACTIVITY_STATE` on HmIP and `DIRECTION` on RF; the
+   * profile maps whichever one the device has onto {@link Field.DIRECTION}, so
+   * this getter never needs to know which family it is looking at.
+   *
+   * The ENUM arrives already converted to its value-list member (the inbound
+   * converter resolves the CCU's index), so this reads names. A numeric value
+   * means the list could not be resolved: index 0 is the non-travelling member
+   * in both families, 1 is up and 2 is down.
+   */
+  public get travel(): CoverTravel {
+    const value = this.dp(Field.DIRECTION)?.value;
+    if (typeof value === 'string') {
+      return TRAVEL_BY_NAME[value.toUpperCase()] ?? 'unknown';
+    }
+    if (typeof value === 'number') {
+      if (value === 0) return 'stable';
+      if (value === 1) return 'opening';
+      if (value === 2) return 'closing';
+    }
+    return 'unknown';
   }
 
-  /** True while the cover is travelling closed (DIRECTION 'DOWN'). */
+  /** True while the cover is travelling open. */
+  public get isOpening(): boolean {
+    return this.travel === 'opening';
+  }
+
+  /** True while the cover is travelling closed. */
   public get isClosing(): boolean {
-    return this.dp(Field.DIRECTION)?.value === DIRECTION_DOWN;
+    return this.travel === 'closing';
   }
 
   /** Open the cover fully (LEVEL 1). */

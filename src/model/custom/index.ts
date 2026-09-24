@@ -21,6 +21,27 @@ deviceProfileRegistry.register('HmIP-PS', {
   channels: [3],
 });
 
+// AUDIT, 2026-09-24, against this CCU's own `listDevices`: the
+// TRANSMITTER / VIRTUAL_RECEIVER split is the HmIP convention across every
+// family, not a cover quirk.
+//
+//   HmIP-BROLL   3:SHUTTER_TRANSMITTER   4,5,6:SHUTTER_VIRTUAL_RECEIVER
+//   HmIP-BSM     3:SWITCH_TRANSMITTER    4,5,6:SWITCH_VIRTUAL_RECEIVER
+//   HmIP-BS2     3,7:SWITCH_TRANSMITTER  4,5,6 + 8,9,10:SWITCH_VIRTUAL_RECEIVER
+//   HmIP-BWTH    9:SWITCH_TRANSMITTER    10,11,12:SWITCH_VIRTUAL_RECEIVER
+//
+// The switch registrations below therefore READ the receiver too. Measured on
+// five live relays (BS2 ×2 incl. its second circuit, BSM ×2), transmitter and
+// receiver agreed on every one: a relay is instantaneous, so the commanded
+// value and the reported value converge and the misalignment is INVISIBLE.
+// It is not absent — a relay switched at the wall, or one that fails to
+// follow, is known to the transmitter and not to the receiver — but it is not
+// something this checkout can demonstrate, so the registrations are left as
+// they are rather than changed on a symmetry argument.
+//
+// The DIMMER case is the one to watch: `HmIP-BDT` is registered on channel 4
+// and a dimmer's LEVEL ramps exactly as a cover's does, so it is likely wrong
+// in the same measurable way. There is no BDT on this CCU to prove it on.
 deviceProfileRegistry.register('HmIP-BSM', {
   entityClass: SwitchEntity,
   profile: DeviceProfile.IP_SWITCH,
@@ -112,8 +133,10 @@ deviceProfileRegistry.register('HM-LC-Dim', {
 });
 
 // --- Cover / Blind ---
-// HmIP roller shutters (BROLL/FROLL) and blinds (BBL/FBL) carry the cover
-// data points on the virtual-receiver channel 4.
+// HmIP roller shutters (BROLL/FROLL) and blinds (BBL/FBL) are COMMANDED on the
+// virtual-receiver channel 4 and REPORT on the transmitter channel 3. The
+// profile carries that split (`readChannelOffset`); the registration names the
+// command channel, which is the one a write must reach.
 deviceProfileRegistry.register('HmIP-BROLL', {
   entityClass: CoverEntity,
   profile: DeviceProfile.IP_COVER,
