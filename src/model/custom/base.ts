@@ -134,6 +134,23 @@ export abstract class CustomEntity {
     return [...seen];
   }
 
+  /**
+   * The channels this entity READS from, when those differ from where it is
+   * commanded. Empty when every field is read where it is written.
+   *
+   * Separate from {@link channelAddresses} because knowing the union is not
+   * enough for a consumer that watches raw parameter events: an HmIP cover
+   * carries `LEVEL` on BOTH the transmitter and the virtual receiver, so
+   * accepting both and taking the last arrival is a coin toss that the
+   * receiver wins — 100 % against a slat at 47.5 %. A parameter available on a
+   * status channel must be taken from THERE and nowhere else.
+   */
+  public get statusChannelAddresses(): readonly string[] {
+    const seen = new Set<string>();
+    for (const dp of this.#readDataPoints.values()) seen.add(dp.dpk.channelAddress);
+    return [...seen];
+  }
+
   /** True when at least one underlying data point was resolved. */
   public get available(): boolean {
     return this.#dataPoints.size > 0;

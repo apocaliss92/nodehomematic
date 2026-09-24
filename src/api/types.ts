@@ -170,6 +170,17 @@ export interface HmCover {
    * `valueChanged` by {@link channel} alone drops exactly the reports it wants.
    */
   readonly channels: readonly string[];
+  /**
+   * The subset of {@link channels} the entity READS from, when that differs
+   * from where it is commanded.
+   *
+   * A consumer watching raw parameter events needs this and not just the
+   * union: `LEVEL` exists on BOTH an HmIP cover's channels, so accepting both
+   * and taking the last arrival lets the receiver's commanded extreme
+   * overwrite the transmitter's real position. Take a parameter from a status
+   * channel when it is available there.
+   */
+  readonly statusChannels: readonly string[];
   /** Position 0..100, or `null` when unavailable. */
   readonly currentPosition: number | null;
   readonly isClosed: boolean;

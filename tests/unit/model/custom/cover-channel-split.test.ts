@@ -104,6 +104,16 @@ describe('an HmIP cover reads the transmitter and commands the receiver', () => 
     expect([...entity.channelAddresses].sort()).toEqual([`${ADDRESS}:3`, `${ADDRESS}:4`]);
   });
 
+  it('names the STATUS channels apart from the union', () => {
+    // `LEVEL` exists on BOTH channels. A consumer watching raw parameter
+    // events and taking the last arrival lets the receiver's commanded
+    // extreme overwrite the transmitter's real position — which is exactly
+    // what happened downstream once the filter was widened to accept both.
+    const { entity } = makeBroll();
+    expect(entity.statusChannelAddresses).toEqual([`${ADDRESS}:3`]);
+    expect(entity.statusChannelAddresses).not.toContain(`${ADDRESS}:4`);
+  });
+
   it('wakes a subscriber on a TRANSMITTER change', () => {
     // The split is worthless if nobody is told. `subscribe` used to walk the
     // command bindings only, so the very value the entity reads would have

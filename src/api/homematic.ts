@@ -1034,6 +1034,7 @@ function toHmCustomEntity(entity: CustomEntity): HmCustomEntity {
       device,
       channel,
       channels: entity.channelAddresses,
+      statusChannels: entity.statusChannelAddresses,
       currentPosition: entity.currentPosition,
       isClosed: entity.isClosed,
       travel: entity.travel,
