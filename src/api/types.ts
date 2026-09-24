@@ -160,10 +160,21 @@ export interface HmLight {
 export interface HmCover {
   readonly kind: 'cover' | 'blind';
   readonly device: string;
+  /** The channel this entity is COMMANDED on. */
   readonly channel: string;
+  /**
+   * Every channel the entity touches, command and status alike.
+   *
+   * An HmIP cover reports its position on the SHUTTER_TRANSMITTER channel and
+   * is commanded on a SHUTTER_VIRTUAL_RECEIVER, so a consumer filtering
+   * `valueChanged` by {@link channel} alone drops exactly the reports it wants.
+   */
+  readonly channels: readonly string[];
   /** Position 0..100, or `null` when unavailable. */
   readonly currentPosition: number | null;
   readonly isClosed: boolean;
+  /** What the cover is doing right now, from its travel data point. */
+  readonly travel: 'opening' | 'closing' | 'stable' | 'unknown';
   /** Slat tilt 0..100 (blinds only), or `null` when unavailable. */
   readonly currentTiltPosition?: number | null;
 }

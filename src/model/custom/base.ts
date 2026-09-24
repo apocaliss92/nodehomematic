@@ -115,6 +115,25 @@ export abstract class CustomEntity {
     await this.#writer(dp.dpk.channelAddress, dp.parameter, value);
   }
 
+  /**
+   * Every channel this entity touches — command bindings and read bindings —
+   * de-duplicated, in a stable order.
+   *
+   * A consumer that watches events per channel needs this: an HmIP cover reads
+   * its position on the transmitter and is commanded on the virtual receiver,
+   * so filtering events by {@link primaryChannelAddress} alone drops exactly
+   * the reports the entity exists to expose. That happened downstream and cost
+   * an evening — the library resolved the right channel and the consumer threw
+   * its events away.
+   */
+  public get channelAddresses(): readonly string[] {
+    const seen = new Set<string>();
+    for (const dp of [...this.#dataPoints.values(), ...this.#readDataPoints.values()]) {
+      seen.add(dp.dpk.channelAddress);
+    }
+    return [...seen];
+  }
+
   /** True when at least one underlying data point was resolved. */
   public get available(): boolean {
     return this.#dataPoints.size > 0;

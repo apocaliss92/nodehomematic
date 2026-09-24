@@ -1033,8 +1033,10 @@ function toHmCustomEntity(entity: CustomEntity): HmCustomEntity {
       kind: entity.kind === 'blind' ? 'blind' : 'cover',
       device,
       channel,
+      channels: entity.channelAddresses,
       currentPosition: entity.currentPosition,
       isClosed: entity.isClosed,
+      travel: entity.travel,
       ...(entity instanceof BlindEntity ? { currentTiltPosition: entity.currentTiltPosition } : {}),
     };
   }

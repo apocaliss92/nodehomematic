@@ -95,6 +95,15 @@ describe('an HmIP cover reads the transmitter and commands the receiver', () => 
     expect(calls[0]?.parameter).toBe('LEVEL');
   });
 
+  it('names BOTH channels it touches', () => {
+    // A consumer filtering `valueChanged` by the command channel alone drops
+    // exactly the reports the entity exists to expose — which is what happened
+    // downstream: the library resolved the transmitter and the consumer threw
+    // its events away, so the fix looked like it had done nothing.
+    const { entity } = makeBroll();
+    expect([...entity.channelAddresses].sort()).toEqual([`${ADDRESS}:3`, `${ADDRESS}:4`]);
+  });
+
   it('wakes a subscriber on a TRANSMITTER change', () => {
     // The split is worthless if nobody is told. `subscribe` used to walk the
     // command bindings only, so the very value the entity reads would have

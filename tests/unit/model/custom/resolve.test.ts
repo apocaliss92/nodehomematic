@@ -69,10 +69,7 @@ describe('buildCustomEntities', () => {
 
     expect(entities).toHaveLength(2);
     expect(entities.every((e) => e instanceof SwitchEntity)).toBe(true);
-    expect(entities.map((e) => e.primaryChannelAddress)).toEqual([
-      'VCU0000005:4',
-      'VCU0000005:8',
-    ]);
+    expect(entities.map((e) => e.primaryChannelAddress)).toEqual(['VCU0000005:4', 'VCU0000005:8']);
 
     // The two relays are independent: each entity reads and writes ITS channel.
     const [relay1, relay2] = entities as [SwitchEntity, SwitchEntity];
