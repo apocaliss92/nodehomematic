@@ -289,8 +289,12 @@ export interface HmServiceMessage {
 export interface HmCcuInfo {
   /** Firmware version, e.g. `3.75.7`. */
   readonly version: string | null;
-  /** Product, e.g. `CCU3`, `RaspberryMatic`, `OpenCCU`. */
+  /** Raw `PRODUCT=` of the CCU's `/VERSION`, e.g. `ccu3`, `raspberrymatic`, `ova` (OpenCCU as a VM). */
   readonly product: string | null;
+  /** Derived family: `ccu3`, `openccu` (OpenCCU / RaspberryMatic, any platform) or `unknown`. */
+  readonly productFamily: 'ccu3' | 'openccu' | 'unknown';
+  /** Raw `PLATFORM=` of `/VERSION`, e.g. `ova`, `rpi4`. */
+  readonly platform: string | null;
   readonly serial: string | null;
   readonly hostname: string | null;
 }

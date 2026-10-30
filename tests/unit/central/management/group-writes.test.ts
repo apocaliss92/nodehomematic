@@ -20,6 +20,8 @@ interface GroupState {
   name: string;
   type: string;
   members: string[];
+  /** GROUP_DEVICE_NAME as the CCU reports it; absent on firmware without the suffix. */
+  deviceName?: string;
 }
 
 /** A tiny HMServer: holds groups, answers create/save/delete, serves groups.gson. */
@@ -77,7 +79,10 @@ function server(initial: GroupState[], opts: { dropWrites?: boolean } = {}) {
               id: g.id,
               groupMembers: g.members.map((m) => ({ id: m, memberType: { id: 'T' } })),
               groupType: { id: g.type },
-              groupProperties: { NAME: g.name },
+              groupProperties:
+                g.deviceName === undefined
+                  ? { NAME: g.name }
+                  : { NAME: g.name, GROUP_DEVICE_NAME: g.deviceName },
             })),
           }),
         );
@@ -134,7 +139,13 @@ describe('CcuManagement group writes', () => {
 
   it('updateGroup sends isNewGroup=false with the merged name/members and flags removed members', async () => {
     const s = server([
-      { id: 3, name: 'Old', type: 'HomeMatic.heating', members: ['LEQ1:1', 'LEQ2:1'] },
+      {
+        id: 3,
+        name: 'Old',
+        type: 'HomeMatic.heating',
+        members: ['LEQ1:1', 'LEQ2:1'],
+        deviceName: 'Old INT0000003',
+      },
     ]);
     const group = await s.mgmt.updateGroup(3, { name: 'New', members: ['LEQ2:1', 'LEQ3:1'] });
     const body = JSON.parse(s.reqs.find((r) => r.kind === 'post')?.body ?? '{}');
@@ -148,6 +159,15 @@ describe('CcuManagement group writes', () => {
     });
     expect(group.name).toBe('New');
     expect(s.metadata.map((m) => m['value'])).toEqual(['true', 'true', 'false']);
+  });
+
+  it('updateGroup keeps the plain name when the CCU reports no INT suffix (OpenCCU 3.89)', async () => {
+    const s = server([
+      { id: 3, name: 'Old', type: 'HomeMatic.heating', members: ['LEQ1:1'], deviceName: 'Old' },
+    ]);
+    await s.mgmt.updateGroup(3, { name: 'New' });
+    const body = JSON.parse(s.reqs.find((r) => r.kind === 'post')?.body ?? '{}');
+    expect(body['groupDeviceName']).toBe('New');
   });
 
   it('deleteGroup posts the id and verifies the group is gone', async () => {

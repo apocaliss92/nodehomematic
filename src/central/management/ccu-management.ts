@@ -124,16 +124,14 @@ function parseKeyValueLines(text: string): Map<string, string> {
   return out;
 }
 
-const PRODUCT_LABELS: ReadonlyMap<string, string> = new Map([
-  ['raspberrymatic', 'RaspberryMatic'],
-  ['openccu', 'OpenCCU'],
-  ['ccu3', 'CCU3'],
-  ['ccu2', 'CCU2'],
-]);
+/** Product families derived from the raw `PRODUCT=` value of `/VERSION`. */
+const OPENCCU_PRODUCTS: ReadonlySet<string> = new Set(['raspberrymatic', 'openccu', 'ova']);
 
-function productLabel(raw: string | undefined): string | null {
-  if (raw === undefined || raw === '') return null;
-  return PRODUCT_LABELS.get(raw.toLowerCase()) ?? raw;
+function productFamily(raw: string | null): HmCcuInfo['productFamily'] {
+  if (raw === null) return 'unknown';
+  const key = raw.toLowerCase();
+  if (key === 'ccu3') return 'ccu3';
+  return OPENCCU_PRODUCTS.has(key) ? 'openccu' : 'unknown';
 }
 
 export class CcuManagement {
@@ -165,14 +163,18 @@ export class CcuManagement {
     for (const entry of offered) {
       const iface = INTERFACES_BY_NAME.get(entry.name);
       const client = iface === undefined ? undefined : this.interfaceClient(iface);
-      if (client === undefined || iface !== Interface.BIDCOS_RF) continue;
+      if (client === undefined || (iface !== Interface.BIDCOS_RF && iface !== Interface.HMIP_RF)) {
+        continue;
+      }
       const gateways = await this.tryOrNull(() => client.listBidcosInterfaces());
       if (gateways !== null) gatewaysByName.set(entry.name, gateways.map(toGateway));
     }
-    const dutyEntries = await this.dutyCycleEntries();
-    const knownGatewayAddresses = new Set<string>();
-    for (const gws of gatewaysByName.values())
-      for (const g of gws) knownGatewayAddresses.add(g.address);
+    const needsFallback = offered.some(
+      (e) =>
+        e.name === Interface.BIDCOS_RF.toString() &&
+        (gatewaysByName.get(e.name) ?? []).every((g) => g.dutyCycle === null),
+    );
+    const fallbackDuty = needsFallback ? await this.ownRadioDutyCycle() : null;
 
     const result: HmInterfaceInfo[] = [];
     for (const entry of offered) {
@@ -180,9 +182,7 @@ export class CcuManagement {
       const primary = gateways.find((g) => g.isDefault) ?? gateways[0];
       const connected = primary?.connected ?? (await this.isPresent(entry.name));
       const dutyCycle =
-        primary !== undefined
-          ? primary.dutyCycle
-          : this.dutyCycleFor(entry.name, dutyEntries, knownGatewayAddresses);
+        primary?.dutyCycle ?? (entry.name === Interface.BIDCOS_RF.toString() ? fallbackDuty : null);
       result.push({
         name: entry.name,
         port: entry.port,
@@ -293,9 +293,12 @@ export class CcuManagement {
       platform.status === 'fulfilled' && isRecord(platform.value)
         ? decodedOrNull(platform.value['host'])
         : null;
+    const product = strOrNull(release.get('PRODUCT'));
     return {
       version: version.status === 'fulfilled' ? strOrNull(version.value) : null,
-      product: productLabel(release.get('PRODUCT')),
+      product,
+      productFamily: productFamily(product),
+      platform: strOrNull(release.get('PLATFORM')),
       serial: serial.status === 'fulfilled' ? strOrNull(serial.value) : null,
       hostname,
     };
@@ -392,7 +395,10 @@ export class CcuManagement {
       forbidSingleOperation: current.forbidSingleOperation,
       assignedDevicesIds: nextMembers,
       isNewGroup: false,
-      groupDeviceName: `${nextName} ${virtualDeviceSerial(id)}`,
+      // The WebUI appends the virtual device serial; a CCU whose groups carry
+      // no such suffix (observed on OpenCCU 3.89) keeps the plain name.
+      groupDeviceName:
+        current.deviceAddress === null ? nextName : `${nextName} ${virtualDeviceSerial(id)}`,
     });
     await this.flagMembers(nextMembers, 'true');
     const kept = new Set(nextMembers);
@@ -583,32 +589,17 @@ export class CcuManagement {
     return null;
   }
 
-  /** `Interface.getDutyCycle` (RaspberryMatic/OpenCCU); `null` when the CCU lacks it. */
-  private async dutyCycleEntries(): Promise<
-    { address: string | null; dutyCycle: number | null }[] | null
-  > {
+  /**
+   * Fallback when `listBidcosInterfaces` gave no answer: `Interface.getDutyCycle`
+   * (RaspberryMatic / OpenCCU) reports the CCU's own radio module as ONE entry
+   * with string numbers (`"7"`). It cannot be attributed to HmIP, so it only
+   * ever stands in for BidCos-RF; non-numeric or absent is `null`.
+   */
+  private async ownRadioDutyCycle(): Promise<number | null> {
     if (this.json === undefined) return null;
     const raw = await this.tryOrNull(() => this.call(JsonRpcMethod.INTERFACE_GET_DUTY_CYCLE));
-    if (!Array.isArray(raw)) return null;
-    return asRecordArray(raw).map((entry) => ({
-      address: strOrNull(entry['address']),
-      dutyCycle: numOrNull(entry['dutyCycle']),
-    }));
-  }
-
-  /**
-   * The HmIP access point is the one duty-cycle entry that does not belong to a
-   * BidCos gateway; with zero or several candidates the attribution is unsafe and
-   * the answer is `null`.
-   */
-  private dutyCycleFor(
-    name: string,
-    entries: { address: string | null; dutyCycle: number | null }[] | null,
-    bidcosAddresses: ReadonlySet<string>,
-  ): number | null {
-    if (entries === null || name !== Interface.HMIP_RF.toString()) return null;
-    const rest = entries.filter((e) => e.address === null || !bidcosAddresses.has(e.address));
-    return rest.length === 1 ? (rest[0]?.dutyCycle ?? null) : null;
+    const entries = asRecordArray(raw);
+    return entries.length === 1 ? numOrNull(entries[0]?.['dutyCycle']) : null;
   }
 }
 

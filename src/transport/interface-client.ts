@@ -514,14 +514,22 @@ function numberOrNull(value: XmlRpcValue | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+/** The CCU sends flags as booleans or as 0/1 integers. */
+function flagOrNull(value: XmlRpcValue | undefined): boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (value === 1) return true;
+  if (value === 0) return false;
+  return null;
+}
+
 function toRadioGateway(entry: Record<string, XmlRpcValue>): RadioGatewayInfo {
-  const connected = entry['CONNECTED'];
+  const connected = flagOrNull(entry['CONNECTED']);
   return {
     address: stringOrNull(entry['ADDRESS']) ?? '',
     description: stringOrNull(entry['DESCRIPTION']),
     dutyCycle: numberOrNull(entry['DUTY_CYCLE']),
-    connected: typeof connected === 'boolean' ? connected : null,
-    isDefault: entry['DEFAULT'] === true,
+    connected,
+    isDefault: flagOrNull(entry['DEFAULT']) === true,
     firmware: stringOrNull(entry['FIRMWARE_VERSION']),
     type: stringOrNull(entry['TYPE']),
   };

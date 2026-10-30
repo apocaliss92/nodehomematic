@@ -38,6 +38,22 @@ function makeSubject(
 }
 
 describe('InterfaceClient — CCU management', () => {
+  it('listBidcosInterfaces reads CONNECTED / DEFAULT sent as 0/1 integers (OpenCCU)', async () => {
+    const { subject } = makeSubject(() =>
+      Promise.resolve([
+        { ADDRESS: 'KEQ0000001', DUTY_CYCLE: 7, CONNECTED: 1, DEFAULT: 1 },
+        { ADDRESS: '3014F711A0000001', DUTY_CYCLE: 31, CONNECTED: 0, DEFAULT: 0 },
+        { ADDRESS: 'ODD0000003', CONNECTED: 'yes' },
+      ]),
+    );
+    const gateways = await subject.listBidcosInterfaces();
+    expect(gateways.map((g) => [g.connected, g.isDefault])).toEqual([
+      [true, true],
+      [false, false],
+      [null, false],
+    ]);
+  });
+
   it('listBidcosInterfaces maps the gateway structs; absent fields are null', async () => {
     const { subject, calls } = makeSubject(() =>
       Promise.resolve([

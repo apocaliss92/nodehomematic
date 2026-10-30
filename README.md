@@ -86,10 +86,10 @@ await hm.stop();
 - **Hub:** `systemVariables()`, `getSystemVariable(name)`, `setSystemVariable(name, value)`, `programs()`, `runProgram(idOrName)`, `setProgramActive(idOrName, active)`, `refreshHub()`.
 
 - **CCU management** (call after `start()`; the ones marked _WebUI_ need `credentials`):
-  - `listInterfaces()` → per interface `name`, `connected`, `dutyCycle`, `firmware`, `type`, `gateways` (BidCos radios). Anything the CCU did not answer is `null`, never `0`. Duty cycle for HmIP comes from `Interface.getDutyCycle`, which only RaspberryMatic/OpenCCU provide.
+  - `listInterfaces()` → per interface `name`, `connected`, `dutyCycle`, `firmware`, `type`, `gateways` (BidCos radios). Anything the CCU did not answer is `null`, never `0`. Per-interface duty cycle, firmware and `connected` come from XML-RPC `listBidcosInterfaces` on both the BidCos-RF and HmIP-RF clients; `Interface.getDutyCycle` (string numbers, one entry, not attributable to HmIP) is only a BidCos-RF fallback.
   - Pairing: `setInstallMode({ interface, on, seconds?, mode? })` (default 60 s, `mode: 'secure'` is BidCos-only), `getInstallMode(interface)` → seconds left.
   - `deleteDevice(address, flags)` with `HM_DELETE_FLAGS.RESET | FORCE | DEFER` (`0` = plain removal).
-  - _WebUI:_ `serviceMessages()` (`UNREACH`, `LOWBAT`, `CONFIG_PENDING`, `STICKY_UNREACH`, … with `acknowledgeable`), `acknowledgeServiceMessage(id)`, `ccuInfo()` (version, product, serial, hostname), `groups()` (HmIP / HomeMatic heating groups with member channels).
+  - _WebUI:_ `serviceMessages()` (`UNREACH`, `LOWBAT`, `CONFIG_PENDING`, `STICKY_UNREACH`, … with `acknowledgeable`), `acknowledgeServiceMessage(id)`, `ccuInfo()` (version, raw `product`/`platform` such as `ova`, derived `productFamily` `ccu3 | openccu | unknown`, serial, hostname), `groups()` (HmIP / HomeMatic heating groups with member channels).
   - _WebUI, undocumented:_ `createGroup({ name, type, members })`, `updateGroup(id, { name?, members? })`, `deleteGroup(id)`. No CCU API exists for these, so they replay the requests the WebUI's group pages send to the HMServer (`/pages/jpages/group/create|save|delete`, same session) and are firmware-dependent. Each write is verified by reading `groups()` back; a mismatch rejects with `GroupWriteVerificationError`.
 
 ## Notes

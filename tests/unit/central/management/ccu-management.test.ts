@@ -70,19 +70,13 @@ function toIface(name: string): Interface {
 }
 
 describe('CcuManagement.listInterfaces', () => {
-  it('merges JSON listInterfaces, BidCos gateways and the HmIP duty cycle', async () => {
+  it('merges JSON listInterfaces, per-interface gateways and duty cycles (OpenCCU probe shape)', async () => {
     const { client, posts } = makeJson((p) => {
       if (p.method === JsonRpcMethod.INTERFACE_LIST_INTERFACES) {
         return [
-          { name: 'BidCos-RF', port: 2001, info: 'BidCos-RF' },
-          { name: 'HmIP-RF', port: 2010, info: 'HmIP-RF' },
-          { name: 'VirtualDevices', port: 9292, info: 'Virtual' },
-        ];
-      }
-      if (p.method === JsonRpcMethod.INTERFACE_GET_DUTY_CYCLE) {
-        return [
-          { address: 'KEQ0000001', dutyCycle: 7, type: 'CCU3' },
-          { address: '3014F711A0001', dutyCycle: 31, type: 'HMIP' },
+          { name: 'BidCos-RF', port: 32001, info: 'BidCos-RF' },
+          { name: 'VirtualDevices', port: 39292, info: 'Virtual' },
+          { name: 'HmIP-RF', port: 32010, info: 'HmIP-RF' },
         ];
       }
       if (p.method === JsonRpcMethod.INTERFACE_IS_PRESENT) {
@@ -98,7 +92,7 @@ describe('CcuManagement.listInterfaces', () => {
             Promise.resolve([
               {
                 address: 'KEQ0000001',
-                description: 'CCU3',
+                description: 'Local radio',
                 dutyCycle: 7,
                 connected: true,
                 isDefault: true,
@@ -107,24 +101,77 @@ describe('CcuManagement.listInterfaces', () => {
               },
             ]),
         }),
-        [Interface.HMIP_RF]: fakeIface(),
+        [Interface.HMIP_RF]: fakeIface({
+          listBidcosInterfaces: () =>
+            Promise.resolve([
+              {
+                address: '3014F711A0000001',
+                description: 'HmIP radio',
+                dutyCycle: 31,
+                connected: true,
+                isDefault: false,
+                firmware: '2.8.6',
+                type: 'HMIP',
+              },
+            ]),
+        }),
       },
     });
     const list = await mgmt.listInterfaces();
-    const bidcos = list.find((i) => i.name === 'BidCos-RF');
-    expect(bidcos).toMatchObject({
-      port: 2001,
+    expect(list.map((i) => i.port)).toEqual([32001, 39292, 32010]);
+    expect(list.find((i) => i.name === 'BidCos-RF')).toMatchObject({
       connected: true,
       dutyCycle: 7,
       firmware: '4.4.18',
-      type: 'CCU3',
     });
-    expect(bidcos?.gateways).toHaveLength(1);
     const hmip = list.find((i) => i.name === 'HmIP-RF');
-    expect(hmip).toMatchObject({ connected: true, dutyCycle: 31, firmware: null, type: null });
-    const virt = list.find((i) => i.name === 'VirtualDevices');
-    expect(virt).toMatchObject({ connected: false, dutyCycle: null });
+    expect(hmip).toMatchObject({ connected: true, dutyCycle: 31, firmware: '2.8.6', type: 'HMIP' });
+    expect(hmip?.gateways).toHaveLength(1);
+    expect(list.find((i) => i.name === 'VirtualDevices')).toMatchObject({
+      connected: false,
+      dutyCycle: null,
+    });
     expect(posts.every((p) => p.sessionId === 'sid-1')).toBe(true);
+  });
+
+  it('falls back to getDutyCycle (string "7") for BidCos-RF only, never attributing it to HmIP', async () => {
+    const { client } = makeJson((p) => {
+      if (p.method === JsonRpcMethod.INTERFACE_LIST_INTERFACES) {
+        return [
+          { name: 'BidCos-RF', port: 32001, info: 'BidCos-RF' },
+          { name: 'HmIP-RF', port: 32010, info: 'HmIP-RF' },
+        ];
+      }
+      if (p.method === JsonRpcMethod.INTERFACE_GET_DUTY_CYCLE) {
+        return [{ address: 'KEQ0000001', dutyCycle: '7', type: 'CCU3' }];
+      }
+      if (p.method === JsonRpcMethod.INTERFACE_IS_PRESENT) return true;
+      throw new Error(`unexpected ${p.method}`);
+    });
+    const list = await build({
+      json: client,
+      clients: { [Interface.BIDCOS_RF]: fakeIface(), [Interface.HMIP_RF]: fakeIface() },
+    }).listInterfaces();
+    expect(list.find((i) => i.name === 'BidCos-RF')?.dutyCycle).toBe(7);
+    expect(list.find((i) => i.name === 'HmIP-RF')?.dutyCycle).toBeNull();
+  });
+
+  it('a non-numeric getDutyCycle value is null, never 0', async () => {
+    const { client } = makeJson((p) => {
+      if (p.method === JsonRpcMethod.INTERFACE_LIST_INTERFACES) {
+        return [{ name: 'BidCos-RF', port: 32001, info: 'BidCos-RF' }];
+      }
+      if (p.method === JsonRpcMethod.INTERFACE_GET_DUTY_CYCLE) {
+        return [{ address: 'KEQ0000001', dutyCycle: 'n/a', type: 'CCU3' }];
+      }
+      if (p.method === JsonRpcMethod.INTERFACE_IS_PRESENT) return true;
+      throw new Error(`unexpected ${p.method}`);
+    });
+    const [bidcos] = await build({
+      json: client,
+      clients: { [Interface.BIDCOS_RF]: fakeIface() },
+    }).listInterfaces();
+    expect(bidcos?.dutyCycle).toBeNull();
   });
 
   it('reports null (never 0) when the duty-cycle / presence calls fail', async () => {
@@ -299,20 +346,22 @@ describe('CcuManagement service messages', () => {
 describe('CcuManagement.ccuInfo', () => {
   it('combines CCU.getVersion, CCU.getSerial and the platform script', async () => {
     const { client } = makeJson((p) => {
-      if (p.method === JsonRpcMethod.CCU_GET_VERSION) return '3.75.7';
+      if (p.method === JsonRpcMethod.CCU_GET_VERSION) return '3.89.11.20260919';
       if (p.method === JsonRpcMethod.CCU_GET_SERIAL) return 'ABC1234567';
       if (p.method === JsonRpcMethod.REGA_RUN_SCRIPT) {
         expect(p.params?.['script']).toBe(GET_CCU_PLATFORM);
         return JSON.stringify({
-          release: 'VERSION=3.75.7%0APRODUCT=raspberrymatic%0A',
+          release: 'VERSION=3.89.11.20260919%0APRODUCT=ova%0APLATFORM=ova%0A',
           host: 'raspberrymatic%0A',
         });
       }
       throw new Error('unexpected');
     });
     await expect(build({ json: client }).ccuInfo()).resolves.toEqual({
-      version: '3.75.7',
-      product: 'RaspberryMatic',
+      version: '3.89.11.20260919',
+      product: 'ova',
+      productFamily: 'openccu',
+      platform: 'ova',
       serial: 'ABC1234567',
       hostname: 'raspberrymatic',
     });
@@ -326,6 +375,8 @@ describe('CcuManagement.ccuInfo', () => {
     await expect(build({ json: partial.client }).ccuInfo()).resolves.toEqual({
       version: '3.75.7',
       product: null,
+      productFamily: 'unknown',
+      platform: null,
       serial: null,
       hostname: null,
     });
