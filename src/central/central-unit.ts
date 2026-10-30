@@ -31,6 +31,7 @@ import { ClientState } from '../transport/resilience/state-machine.js';
 import { InterfaceClient } from '../transport/interface-client.js';
 import { JsonRpcClient } from '../transport/jsonrpc/client.js';
 import { SessionManager } from '../transport/jsonrpc/session.js';
+import { CcuManagement } from './management/ccu-management.js';
 import { CallbackServer } from '../transport/callback-server/server.js';
 import type { RawCallbackEvent } from '../transport/callback-server/events.js';
 import type { XmlRpcValue } from '../transport/xmlrpc/types.js';
@@ -303,6 +304,37 @@ export class CentralUnit {
       client,
       getSessionId: () => this.session?.sessionId,
     });
+  }
+
+  // --- management surface -------------------------------------------------
+
+  /**
+   * Build the {@link CcuManagement} bound to this central's interface clients and
+   * (when credentialed) its JSON-RPC client. The session id is ensured per call
+   * through the {@link SessionManager}, so renews apply. INTERNAL: the facade
+   * exposes it; it is not part of the published surface.
+   */
+  public getManagement(): CcuManagement {
+    return new CcuManagement({
+      json: this.jsonClient,
+      getSessionId: () =>
+        this.session !== undefined ? this.session.ensureSession() : Promise.resolve(undefined),
+      interfaceClient: (iface) => {
+        for (const runtime of this.runtimes.values()) {
+          if (runtime.iface === iface) return runtime.client;
+        }
+        return undefined;
+      },
+      configuredInterfaces: () => this.interfaces,
+    });
+  }
+
+  /**
+   * Remove a device from the interface owning it, routing by `interfaceId`.
+   * Throws if the interface is unknown.
+   */
+  public async deleteDevice(interfaceId: string, address: string, flags: number): Promise<void> {
+    await this.clientFor(interfaceId).deleteDevice(address, flags);
   }
 
   // --- config surface (Phase 3, Task 7) -------------------------------------

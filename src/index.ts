@@ -13,7 +13,16 @@ export type {
   HomematicCache,
 } from './api/homematic.js';
 
+export { HM_DELETE_FLAGS } from './api/types.js';
 export type {
+  HmCcuInfo,
+  HmGroup,
+  HmGroupMember,
+  HmInstallModeKind,
+  HmInstallModeRequest,
+  HmInterfaceInfo,
+  HmRadioGateway,
+  HmServiceMessage,
   HmDevice,
   HmChannel,
   HmDataPoint,

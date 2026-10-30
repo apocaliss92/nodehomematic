@@ -85,6 +85,13 @@ await hm.stop();
 - **Device config:** `getConfigParams(channelAddress)`, `getConfig(channelAddress)`, `setConfig(channelAddress, values)`.
 - **Hub:** `systemVariables()`, `getSystemVariable(name)`, `setSystemVariable(name, value)`, `programs()`, `runProgram(idOrName)`, `setProgramActive(idOrName, active)`, `refreshHub()`.
 
+- **CCU management** (call after `start()`; the ones marked _WebUI_ need `credentials`):
+  - `listInterfaces()` → per interface `name`, `connected`, `dutyCycle`, `firmware`, `type`, `gateways` (BidCos radios). Anything the CCU did not answer is `null`, never `0`. Duty cycle for HmIP comes from `Interface.getDutyCycle`, which only RaspberryMatic/OpenCCU provide.
+  - Pairing: `setInstallMode({ interface, on, seconds?, mode? })` (default 60 s, `mode: 'secure'` is BidCos-only), `getInstallMode(interface)` → seconds left.
+  - `deleteDevice(address, flags)` with `HM_DELETE_FLAGS.RESET | FORCE | DEFER` (`0` = plain removal).
+  - _WebUI:_ `serviceMessages()` (`UNREACH`, `LOWBAT`, `CONFIG_PENDING`, `STICKY_UNREACH`, … with `acknowledgeable`), `acknowledgeServiceMessage(id)`, `ccuInfo()` (version, product, serial, hostname), `groups()` (HmIP / HomeMatic heating groups with member channels).
+  - Groups are **read-only**: creating or editing a group is done by the HMServer's own WebUI pages and no documented JSON-RPC/XML-RPC method exists for it.
+
 ## Notes
 
 - The `callback.host` must be the IP of the machine running nodehomematic, **reachable by the CCU** (the CCU pushes events there).

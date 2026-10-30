@@ -15,6 +15,7 @@
 
 import { CentralUnit, type JsonRpcClientLike } from '../central/central-unit.js';
 import type { HubFetcher } from '../central/hub/hub-fetcher.js';
+import type { CcuManagement } from '../central/management/ccu-management.js';
 import type { SystemVariable } from '../central/hub/sysvar.js';
 import type { HmProgramRecord } from '../central/hub/program.js';
 import type { InterfaceClient } from '../transport/interface-client.js';
@@ -46,12 +47,17 @@ import { TypedEventEmitter } from './emitter.js';
 import type { HomematicEventMap } from './events.js';
 import type {
   DataPointRef,
+  HmCcuInfo,
   HmChannel,
   HmConfigParam,
   HmCustomEntity,
   HmDataPoint,
   HmDevice,
+  HmGroup,
+  HmInstallModeRequest,
+  HmInterfaceInfo,
   HmProgram,
+  HmServiceMessage,
   HmSysVar,
   HmValue,
 } from './types.js';
@@ -221,6 +227,8 @@ export class Homematic {
   // --- hub layer (Phase 5) ---------------------------------------------------
   /** Bound hub fetcher, or undefined when no JSON-RPC client is available. */
   #hub: HubFetcher | undefined;
+  /** CCU-management service, built on first use, cleared at stop(). */
+  #management: CcuManagement | undefined;
   /** Snapshot of system variables, refreshed on start / refreshHub. */
   #sysvars: SystemVariable[] = [];
   /** Snapshot of programs, refreshed on start / refreshHub. */
@@ -305,6 +313,7 @@ export class Homematic {
     this.#customEntityList = [];
     this.#customEntitiesByKey.clear();
     this.#hub = undefined;
+    this.#management = undefined;
     this.#sysvars = [];
     this.#programs = [];
     this.#roomsByDevice.clear();
@@ -361,6 +370,94 @@ export class Homematic {
       throw new ValidationError(`Unknown device "${deviceAddress}".`);
     }
     await this.#central.installFirmware(device.interfaceId, deviceAddress);
+  }
+
+  // --- CCU management ---------------------------------------------------------
+
+  /**
+   * Every interface the CCU offers (BidCos-RF, HmIP-RF, VirtualDevices, ...)
+   * with connection state, duty cycle, firmware and type where the CCU reports
+   * them. A value the CCU did not answer is `null`, never `0`. Needs a started
+   * facade.
+   *
+   * CCU methods: JSON-RPC `Interface.listInterfaces` / `Interface.isPresent`
+   * (eq-3/occu `WebUI/www/api/methods/interface/`), XML-RPC
+   * `listBidcosInterfaces` on BidCos-RF, JSON-RPC `Interface.getDutyCycle`
+   * (RaspberryMatic / OpenCCU only) for the HmIP access point.
+   */
+  public async listInterfaces(): Promise<HmInterfaceInfo[]> {
+    return this.#requireManagement().listInterfaces();
+  }
+
+  /**
+   * Open (default 60 s, 1..3600) or close the pairing window of a configured
+   * interface. XML-RPC `setInstallMode`; `mode: 'secure'` (BidCos only) also
+   * teaches the HomeMatic Secure key.
+   */
+  public async setInstallMode(request: HmInstallModeRequest): Promise<void> {
+    await this.#requireManagement().setInstallMode(request);
+  }
+
+  /** Seconds left of an interface's pairing window (`null` when the CCU's answer was unusable). XML-RPC `getInstallMode`. */
+  public async getInstallMode(interfaceName: string): Promise<number | null> {
+    return this.#requireManagement().getInstallMode(interfaceName);
+  }
+
+  /**
+   * Remove a device from its interface (XML-RPC `deleteDevice`). `flags` is an OR
+   * of {@link HM_DELETE_FLAGS}: `RESET` (0x01, factory reset), `FORCE` (0x02,
+   * remove even when unreachable), `DEFER` (0x04, remove when next reachable);
+   * `0` is a plain removal. The model drops the device once the CCU reports it
+   * through the `deleteDevices` callback. Throws {@link ValidationError} for an
+   * unknown device or invalid flags.
+   */
+  public async deleteDevice(deviceAddress: string, flags: number = 0): Promise<void> {
+    this.#requireManagement();
+    const device = this.#devicesByAddress.get(deviceAddress);
+    if (device === undefined) {
+      throw new ValidationError(`Unknown device "${deviceAddress}".`);
+    }
+    if (!Number.isInteger(flags) || flags < 0 || flags > 7) {
+      throw new ValidationError(
+        `Invalid delete flags ${String(flags)} (expected an integer 0..7).`,
+      );
+    }
+    await this.#central.deleteDevice(device.interfaceId, deviceAddress, flags);
+  }
+
+  /**
+   * The CCU's active service messages (UNREACH, LOWBAT, CONFIG_PENDING,
+   * STICKY_UNREACH, ...). Needs WebUI credentials. ReGa script over
+   * `ReGa.runScript` (eq-3/occu `WebUI/www/rega/esp/system.fn`, `ID_SERVICES`).
+   */
+  public async serviceMessages(): Promise<HmServiceMessage[]> {
+    return this.#requireManagement().serviceMessages();
+  }
+
+  /** Acknowledge a service message by its `id` (ReGa `AlReceipt`, as the WebUI does). Needs WebUI credentials. */
+  public async acknowledgeServiceMessage(id: string): Promise<void> {
+    await this.#requireManagement().acknowledgeServiceMessage(id);
+  }
+
+  /**
+   * Version, product (CCU3 / RaspberryMatic / OpenCCU), serial and hostname.
+   * Needs WebUI credentials. JSON-RPC `CCU.getVersion`, `CCU.getSerial`
+   * (eq-3/occu `WebUI/www/api/methods/ccu/`) plus a ReGa read of `/VERSION`.
+   */
+  public async ccuInfo(): Promise<HmCcuInfo> {
+    return this.#requireManagement().ccuInfo();
+  }
+
+  /**
+   * The CCU's heating groups ("Gruppen"): HmIP heating groups and HomeMatic
+   * heating groups with their member channels. READ-ONLY: group creation and
+   * editing is done by the HMServer's own WebUI pages and no JSON-RPC / XML-RPC
+   * method for it is documented, so there is no create/update/delete here.
+   * JSON-RPC `CCU.getHeatingGroupList` (eq-3/occu
+   * `WebUI/www/api/methods/ccu/getheatinggrouplist.tcl`). Needs WebUI credentials.
+   */
+  public async groups(): Promise<HmGroup[]> {
+    return this.#requireManagement().groups();
   }
 
   // --- device configuration (MASTER paramset) -------------------------------
@@ -927,6 +1024,15 @@ export class Homematic {
     const byName = this.#programs.find((p) => p.name === idOrName);
     if (byName !== undefined) return byName.id;
     throw new ValidationError(`Unknown program "${idOrName}".`);
+  }
+
+  /** Return the management service (built on first use), or throw before start(). */
+  #requireManagement(): CcuManagement {
+    if (!this.#started) {
+      throw new ValidationError('Homematic is not started; call start() first.');
+    }
+    this.#management ??= this.#central.getManagement();
+    return this.#management;
   }
 
   /** Return the bound hub fetcher, or throw if none (no credentials). */

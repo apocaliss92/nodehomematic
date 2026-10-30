@@ -129,3 +129,90 @@ foreach(sChnId, dom.GetObject(ID_CHANNELS).EnumUsedIDs()) {
     }
 }
 Write("}}");`;
+
+/**
+ * Emit `[{"id","name"(UriEncoded),"address"("DEV:ch"),"type"(HSSID),"timestamp"
+ * (epoch seconds),"acknowledgeable"},...]` for every ACTIVE service message.
+ *
+ * Source: the WebUI's own listing in eq-3/occu `WebUI/www/rega/esp/system.fn`
+ * (`dom.GetObject(ID_SERVICES)`, `OT_ALARMDP`, `AlState() == asOncoming`,
+ * `LastTriggerID()` for the message type and channel). A message is
+ * acknowledgeable under the same rule the WebUI's `ReceiptAlarm` applies
+ * (`WebUI/www/rega/esp/functions.fn`): there is no trigger data point, or the
+ * trigger is writable (`STICKY_UNREACH` is; `UNREACH` / `LOWBAT` clear on their own).
+ */
+export const GET_SERVICE_MESSAGES = `string sAID;
+string sSep = "";
+Write("[");
+foreach(sAID, dom.GetObject(ID_SERVICES).EnumIDs()) {
+    object oAlarm = dom.GetObject(sAID);
+    if (oAlarm) {
+        if (oAlarm.IsTypeOf(OT_ALARMDP)) {
+            if (oAlarm.AlState() == asOncoming) {
+                string sAddr = "";
+                string sType = "";
+                string sAck = "true";
+                object oLast = dom.GetObject(oAlarm.LastTriggerID());
+                if (oLast) {
+                    sType = oLast.HSSID();
+                    object oChn = dom.GetObject(oLast.Channel());
+                    if (oChn) {
+                        sAddr = oChn.Address();
+                    }
+                }
+                object oTrig = dom.GetObject(oAlarm.AlTriggerDP());
+                if (oTrig) {
+                    if (!(oTrig.Operations() & OPERATION_WRITE)) {
+                        sAck = "false";
+                    }
+                }
+                Write(sSep);
+                Write("{\\"id\\":");
+                Write(oAlarm.ID());
+                Write(",\\"name\\":\\"");
+                Write(oAlarm.Name().UriEncode());
+                Write("\\",\\"address\\":\\"");
+                Write(sAddr);
+                Write("\\",\\"type\\":\\"");
+                Write(sType);
+                Write("\\",\\"timestamp\\":");
+                Write(oAlarm.AlOccurrenceTime().ToInteger());
+                Write(",\\"acknowledgeable\\":");
+                Write(sAck);
+                Write("}");
+                sSep = ",";
+            }
+        }
+    }
+}
+Write("]");`;
+
+/**
+ * Acknowledge ("quittieren") one service message by ReGa object id. Mirrors the
+ * WebUI's `ReceiptAlarm` (`oAlarm.AlReceipt()`). Placeholder: `##id##` (digits
+ * only, validated by the caller). Emits `{"ok":true}` when the object existed.
+ */
+export const ACKNOWLEDGE_SERVICE_MESSAGE = `object oAlarm = dom.GetObject(##id##);
+if (oAlarm) {
+    oAlarm.AlReceipt();
+    Write("{\\"ok\\":true}");
+} else {
+    Write("{\\"ok\\":false}");
+}`;
+
+/**
+ * Emit `{"release":<UriEncoded /VERSION>,"host":<UriEncoded hostname>}`. The
+ * `/VERSION` file carries `VERSION=` and `PRODUCT=` (CCU3, RaspberryMatic,
+ * OpenCCU); no JSON-RPC method exposes the product (`CCU.getVersion` reads only
+ * the `VERSION=` line, see eq-3/occu `WebUI/www/api/methods/ccu/getversion.tcl`).
+ */
+export const GET_CCU_PLATFORM = `string sRelease;
+string sHost;
+string sErr;
+system.Exec("cat /VERSION", &sRelease, &sErr);
+system.Exec("hostname", &sHost, &sErr);
+Write("{\\"release\\":\\"");
+Write(sRelease.UriEncode());
+Write("\\",\\"host\\":\\"");
+Write(sHost.UriEncode());
+Write("\\"}");`;

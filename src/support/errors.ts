@@ -43,6 +43,26 @@ export class InternalBackendError extends BaseHomematicError {}
 /** A newer command superseded this one before it completed. */
 export class CommandSupersededError extends BaseHomematicError {}
 
+/**
+ * A CCU-management call failed. Carries the CCU method that failed (e.g.
+ * `deleteDevice`, `Interface.getDutyCycle`) and the original typed error, whose
+ * text (fault code and message) is part of this error's message. Never holds
+ * credentials or session ids.
+ */
+export class CcuManagementError extends BaseHomematicError {
+  /** The XML-RPC / JSON-RPC method that failed. */
+  public readonly method: string;
+  /** The underlying typed error (or whatever was thrown). */
+  public readonly original: unknown;
+
+  public constructor(method: string, original: unknown) {
+    const detail = original instanceof Error ? original.message : String(original);
+    super(`${method} failed: ${detail}`);
+    this.method = method;
+    this.original = original;
+  }
+}
+
 /** A requested device/paramset description could not be found. */
 export class DescriptionNotFoundError extends BaseHomematicError {}
 

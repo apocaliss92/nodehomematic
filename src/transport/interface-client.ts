@@ -9,7 +9,13 @@
  * the documented trust boundary.
  */
 
-import { CircuitBreakerOpenError, NoConnectionError, TimeoutError } from '../support/errors.js';
+import {
+  BaseHomematicError,
+  CcuManagementError,
+  CircuitBreakerOpenError,
+  NoConnectionError,
+  TimeoutError,
+} from '../support/errors.js';
 import {
   Interface,
   INTERFACE_PORTS,
@@ -41,6 +47,27 @@ export type XmlRpcClientFactory = (
   auth: BasicAuth | undefined,
   tls: boolean,
 ) => XmlRpcClientLike;
+
+/** One radio gateway as `listBidcosInterfaces` reports it; unknowns are `null`. */
+export interface RadioGatewayInfo {
+  readonly address: string;
+  readonly description: string | null;
+  /** Duty cycle in percent, or `null` when the CCU did not report one. */
+  readonly dutyCycle: number | null;
+  readonly connected: boolean | null;
+  readonly isDefault: boolean;
+  readonly firmware: string | null;
+  readonly type: string | null;
+}
+
+/** Arguments of {@link InterfaceClient.setInstallMode}. */
+export interface InstallModeCall {
+  readonly on: boolean;
+  /** Length of the pairing window; omitted when switching off. */
+  readonly seconds?: number;
+  /** BidCos only: 1 normal, 2 with the HomeMatic Secure key. */
+  readonly mode?: 1 | 2;
+}
 
 /** Construction options for {@link InterfaceClient}. */
 export interface InterfaceClientOptions {
@@ -290,6 +317,60 @@ export class InterfaceClient {
     return typeof result === 'number' ? result : 0;
   }
 
+  /**
+   * `listBidcosInterfaces()` → the radio gateways of a BidCos interface.
+   *
+   * Source: HomeMatic XML-RPC interface spec (rfd), as consumed by the WebUI in
+   * eq-3/occu `WebUI/www/api/methods/interface/listbidcosinterfaces.tcl`
+   * (fields ADDRESS, DESCRIPTION, DUTY_CYCLE, CONNECTED, DEFAULT,
+   * FIRMWARE_VERSION, TYPE). A field the CCU did not send is `null`, never 0.
+   */
+  public async listBidcosInterfaces(): Promise<RadioGatewayInfo[]> {
+    const result = await this.managementCall('listBidcosInterfaces', []);
+    if (!Array.isArray(result)) return [];
+    const gateways: RadioGatewayInfo[] = [];
+    for (const entry of result) {
+      if (isStruct(entry)) gateways.push(toRadioGateway(entry));
+    }
+    return gateways;
+  }
+
+  /**
+   * `setInstallMode(on[, seconds[, mode]])` — open or close the pairing window.
+   *
+   * Source: HomeMatic XML-RPC interface spec; the WebUI forwards the same call
+   * in eq-3/occu `WebUI/www/api/methods/interface/setinstallmode.tcl` and
+   * `setinstallmodehmip.tcl` (`setInstallMode(bool on, int time)`). `mode`
+   * (1 normal, 2 with the HomeMatic Secure key) is BidCos-only and is sent only
+   * when given.
+   */
+  public async setInstallMode(request: InstallModeCall): Promise<void> {
+    const params: XmlRpcValue[] = [request.on];
+    if (request.seconds !== undefined) params.push(request.seconds);
+    if (request.mode !== undefined) params.push(request.mode);
+    await this.managementCall('setInstallMode', params);
+  }
+
+  /**
+   * `getInstallMode()` → seconds left of the pairing window, or `null` when the
+   * CCU answered something that is not an integer (never a fake 0).
+   */
+  public async getInstallModeRemaining(): Promise<number | null> {
+    const result = await this.managementCall('getInstallMode', []);
+    return typeof result === 'number' && Number.isInteger(result) ? result : null;
+  }
+
+  /**
+   * `deleteDevice(address, flags)` — remove a device from the interface.
+   *
+   * Source: eq-3/occu `WebUI/www/api/methods/interface/deletedevice.tcl`:
+   * flags 0x01 reset to factory, 0x02 force (also when unreachable), 0x04 defer
+   * until the device is next reachable.
+   */
+  public async deleteDevice(address: string, flags: number): Promise<void> {
+    await this.managementCall('deleteDevice', [address, flags]);
+  }
+
   /** `getVersion()` (bypass) → backend version string. */
   public async getVersion(): Promise<string> {
     const result = await this.callGuarded('getVersion', [], { bypassBreaker: true });
@@ -300,6 +381,22 @@ export class InterfaceClient {
   public async listMethods(): Promise<string[]> {
     const result = await this.callGuarded('system.listMethods', [], { bypassBreaker: true });
     return Array.isArray(result) ? result.map(scalarToString) : [];
+  }
+
+  /**
+   * A management call: guarded like any other, but a failure is rethrown as a
+   * {@link CcuManagementError} naming the method and keeping the CCU fault text.
+   */
+  private async managementCall(
+    method: string,
+    params: readonly XmlRpcValue[],
+  ): Promise<XmlRpcValue> {
+    try {
+      return await this.callGuarded(method, params);
+    } catch (err) {
+      if (err instanceof BaseHomematicError) throw new CcuManagementError(method, err);
+      throw err;
+    }
   }
 
   /**
@@ -407,4 +504,25 @@ function asDeviceDescriptionArray(value: XmlRpcValue): DeviceDescription[] {
 function asParamsetDescription(value: XmlRpcValue): Record<string, ParameterData> {
   const struct = asStruct(value);
   return struct as Record<string, ParameterData>;
+}
+
+function stringOrNull(value: XmlRpcValue | undefined): string | null {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+function numberOrNull(value: XmlRpcValue | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function toRadioGateway(entry: Record<string, XmlRpcValue>): RadioGatewayInfo {
+  const connected = entry['CONNECTED'];
+  return {
+    address: stringOrNull(entry['ADDRESS']) ?? '',
+    description: stringOrNull(entry['DESCRIPTION']),
+    dutyCycle: numberOrNull(entry['DUTY_CYCLE']),
+    connected: typeof connected === 'boolean' ? connected : null,
+    isDefault: entry['DEFAULT'] === true,
+    firmware: stringOrNull(entry['FIRMWARE_VERSION']),
+    type: stringOrNull(entry['TYPE']),
+  };
 }

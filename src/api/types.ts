@@ -203,3 +203,115 @@ export interface HmLock {
  * view of the entity's current state; issue commands through the facade methods.
  */
 export type HmCustomEntity = HmClimate | HmSwitch | HmLight | HmCover | HmLock;
+
+// --- CCU management ---------------------------------------------------------
+//
+// Shapes for the facade's CCU-management API (interfaces & radio health,
+// pairing, device removal, service messages, CCU info, heating groups). A value
+// the CCU did not answer is `null`, never `0` / `false` / `''`.
+
+/** One radio gateway behind a BidCos interface (the CCU's own radio or a LAN gateway). */
+export interface HmRadioGateway {
+  readonly address: string;
+  readonly description: string | null;
+  /** Duty cycle in percent (0..100), or `null` when not reported. */
+  readonly dutyCycle: number | null;
+  readonly connected: boolean | null;
+  readonly isDefault: boolean;
+  readonly firmware: string | null;
+  readonly type: string | null;
+}
+
+/** A CCU interface (BidCos-RF, HmIP-RF, VirtualDevices, ...) and its radio health. */
+export interface HmInterfaceInfo {
+  /** Interface name as the CCU spells it, e.g. `HmIP-RF`. */
+  readonly name: string;
+  /** XML-RPC port of the interface service, or `null` when unknown. */
+  readonly port: number | null;
+  /** The CCU's short description of the interface, or `null`. */
+  readonly info: string | null;
+  /** Whether the interface service / radio is reachable; `null` when it could not be told. */
+  readonly connected: boolean | null;
+  /** Duty cycle in percent (0..100); `null` when the CCU did not report one. */
+  readonly dutyCycle: number | null;
+  readonly firmware: string | null;
+  readonly type: string | null;
+  /** Radio gateways (BidCos only; empty for other interfaces). */
+  readonly gateways: readonly HmRadioGateway[];
+}
+
+/** BidCos pairing flavour: `normal`, or `secure` (also teaches the HomeMatic Secure key). */
+export type HmInstallModeKind = 'normal' | 'secure';
+
+/** Input of {@link Homematic.setInstallMode}. */
+export interface HmInstallModeRequest {
+  /** Interface name, e.g. `HmIP-RF`. Must be one of the facade's configured interfaces. */
+  readonly interface: string;
+  readonly on: boolean;
+  /** Pairing window length in seconds (1..3600, default 60). Ignored when `on` is false. */
+  readonly seconds?: number;
+  /** BidCos only. Defaults to the CCU's own default (normal). */
+  readonly mode?: HmInstallModeKind;
+}
+
+/**
+ * Bit flags of {@link Homematic.deleteDevice}. OR them together, e.g.
+ * `HM_DELETE_FLAGS.RESET | HM_DELETE_FLAGS.FORCE`.
+ */
+export const HM_DELETE_FLAGS = {
+  /** 0x01: reset the device to factory settings while removing it. */
+  RESET: 0x01,
+  /** 0x02: remove it even when it is not reachable. */
+  FORCE: 0x02,
+  /** 0x04: remove it the next time it is reachable. */
+  DEFER: 0x04,
+} as const;
+
+/** A single active service message (`Servicemeldung`). */
+export interface HmServiceMessage {
+  /** ReGa object id; pass to {@link Homematic.acknowledgeServiceMessage}. */
+  readonly id: string;
+  /** Name of the alarm object as the CCU shows it, or `null`. */
+  readonly name: string | null;
+  /** Device address (without the channel), or `null` when the message has no device. */
+  readonly address: string | null;
+  /** Channel index the message came from (`0` = maintenance), or `null`. */
+  readonly channel: number | null;
+  /** Message kind, e.g. `UNREACH`, `LOWBAT`, `CONFIG_PENDING`, `STICKY_UNREACH`. */
+  readonly type: string | null;
+  /** When it came in, epoch milliseconds, or `null` when the CCU reported none. */
+  readonly timestamp: number | null;
+  /** Whether the CCU lets an operator acknowledge it (sticky messages; the rest clear themselves). */
+  readonly acknowledgeable: boolean;
+}
+
+/** What the CCU says about itself. Each field is `null` when it did not answer. */
+export interface HmCcuInfo {
+  /** Firmware version, e.g. `3.75.7`. */
+  readonly version: string | null;
+  /** Product, e.g. `CCU3`, `RaspberryMatic`, `OpenCCU`. */
+  readonly product: string | null;
+  readonly serial: string | null;
+  readonly hostname: string | null;
+}
+
+/** A channel that belongs to a {@link HmGroup}. */
+export interface HmGroupMember {
+  /** Channel address, e.g. `000A9D89A7AF25:1`. */
+  readonly address: string;
+  /** Channel type, e.g. `WALLMOUNTED_THERMOSTAT`. */
+  readonly type: string;
+}
+
+/** A heating group as the WebUI's "Gruppen" page shows it (read-only here). */
+export interface HmGroup {
+  readonly id: number;
+  readonly name: string;
+  /** Group type id: `hmip.heating.group` (HmIP) or `HomeMatic.heating`. */
+  readonly type: string;
+  readonly typeLabel: string | null;
+  /** The virtual device that operates the group (`INT0000001`), when named. */
+  readonly deviceAddress: string | null;
+  readonly forbidSingleOperation: boolean;
+  readonly members: readonly HmGroupMember[];
+}
