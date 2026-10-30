@@ -315,3 +315,20 @@ export interface HmGroup {
   readonly forbidSingleOperation: boolean;
   readonly members: readonly HmGroupMember[];
 }
+
+/** Input of {@link Homematic.createGroup}. */
+export interface HmGroupCreate {
+  /** Group name (a `"` is replaced by `'`, as the WebUI does). */
+  readonly name: string;
+  /** Group type id, e.g. `hmip.heating.group` or `HomeMatic.heating`. */
+  readonly type: string;
+  /** Member channel addresses, e.g. `000A9D89A7AF25:1`. */
+  readonly members: readonly string[];
+}
+
+/** Input of {@link Homematic.updateGroup}; at least one field is required. */
+export interface HmGroupUpdate {
+  readonly name?: string;
+  /** The full new member list (not a delta). */
+  readonly members?: readonly string[];
+}

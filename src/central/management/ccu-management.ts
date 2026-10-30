@@ -14,14 +14,22 @@
 import type {
   HmCcuInfo,
   HmGroup,
+  HmGroupCreate,
   HmGroupMember,
+  HmGroupUpdate,
   HmInstallModeRequest,
   HmInterfaceInfo,
   HmRadioGateway,
   HmServiceMessage,
 } from '../../api/types.js';
 import { Interface } from '../../support/constants.js';
-import { CcuManagementError, ValidationError } from '../../support/errors.js';
+import {
+  CcuManagementError,
+  ClientError,
+  GroupWriteVerificationError,
+  ValidationError,
+} from '../../support/errors.js';
+import { jsEscape, type WebUiHttp } from '../../transport/webui/webui-http.js';
 import { JsonRpcMethod } from '../../transport/jsonrpc/methods.js';
 import type { InstallModeCall, RadioGatewayInfo } from '../../transport/interface-client.js';
 import { decodeRegaName, runScript, type RegaPostClient } from '../rega/rega-runner.js';
@@ -42,6 +50,8 @@ export interface ManagementInterfaceClient {
 export interface CcuManagementOptions {
   /** WebUI JSON-RPC client, or `undefined` without credentials. */
   readonly json: RegaPostClient | undefined;
+  /** WebUI HMServer page transport (group writes), or `undefined` without credentials. */
+  readonly webUi?: WebUiHttp | undefined;
   /** Current (renewed if needed) session id; `undefined` for session-less clients. */
   readonly getSessionId: () => Promise<string | undefined>;
   /** The XML-RPC client of a configured interface. */
@@ -50,6 +60,15 @@ export interface CcuManagementOptions {
   readonly configuredInterfaces: () => readonly Interface[];
 }
 
+const GROUP_CREATE_PATH = '/pages/jpages/group/create';
+const GROUP_SAVE_PATH = '/pages/jpages/group/save';
+const GROUP_DELETE_PATH = '/pages/jpages/group/delete';
+/** The draft id the `create` page embeds: `self.groupId = 7;` (GroupEditPage.ftl). */
+const DRAFT_GROUP_ID = /self\.groupId\s*=\s*(\d+)/;
+/** Group types the WebUI offers; any type seen in `groups()` is accepted too. */
+const KNOWN_GROUP_TYPES: readonly string[] = ['hmip.heating.group', 'HomeMatic.heating'];
+const CHANNEL_ADDRESS = /^[0-9A-Za-z_-]+:\d+$/;
+const MAX_GROUP_NAME = 64;
 const DEFAULT_INSTALL_SECONDS = 60;
 const MAX_INSTALL_SECONDS = 3600;
 const SERVICE_MESSAGE_ID = /^\d+$/;
@@ -119,12 +138,14 @@ function productLabel(raw: string | undefined): string | null {
 
 export class CcuManagement {
   private readonly json: RegaPostClient | undefined;
+  private readonly webUi: WebUiHttp | undefined;
   private readonly getSessionId: () => Promise<string | undefined>;
   private readonly interfaceClient: (iface: Interface) => ManagementInterfaceClient | undefined;
   private readonly configuredInterfaces: () => readonly Interface[];
 
   public constructor(options: CcuManagementOptions) {
     this.json = options.json;
+    this.webUi = options.webUi;
     this.getSessionId = options.getSessionId;
     this.interfaceClient = options.interfaceClient;
     this.configuredInterfaces = options.configuredInterfaces;
@@ -285,8 +306,8 @@ export class CcuManagement {
   /**
    * The heating groups of the CCU ("Gruppen"), read from `CCU.getHeatingGroupList`
    * (the HMServer's `/etc/config/groups.gson`). `[]` when the CCU has no groups
-   * file. Read-only: creating and changing groups stays with the HMServer's
-   * WebUI pages; no JSON-RPC / XML-RPC method for it is documented.
+   * file. Writes (`createGroup` / `updateGroup` / `deleteGroup`) go through the
+   * HMServer's WebUI pages instead, see the group-writes section below.
    */
   public async groups(): Promise<HmGroup[]> {
     const raw = await this.call(JsonRpcMethod.CCU_GET_HEATING_GROUP_LIST);
@@ -307,6 +328,176 @@ export class CcuManagement {
         const group = toGroup(entry);
         return group === null ? [] : [group];
       });
+  }
+
+  // --- group writes ------------------------------------------------------------
+  //
+  // WARNING: UNDOCUMENTED and firmware-dependent. There is no JSON-RPC / XML-RPC
+  // method for group writes; these calls reproduce what the CCU WebUI's own
+  // JavaScript sends to the HMServer pages, copied from eq-3/occu
+  //   HMserver/opt/HMServer/pages/GroupEditPage.ftl  (`_SaveGroup`: POST
+  //     /pages/jpages/group/save?sid=...)
+  //   HMserver/opt/HMServer/pages/GroupListPage.ftl  (`NewGroup`: GET
+  //     /pages/jpages/group/create; `removeGroup`: POST /pages/jpages/group/delete)
+  // plus the `Interface.setMetadata inHeatingGroup` hints the same page sets.
+  // Every write is verified by reading `groups()` back; a mismatch is a
+  // GroupWriteVerificationError. Unlike the WebUI, the virtual group device and
+  // its channels are not renamed afterwards.
+
+  /** Create a group; resolves with the group as read back from the CCU. */
+  public async createGroup(input: HmGroupCreate): Promise<HmGroup> {
+    const name = validateGroupName(input.name);
+    const members = validateMembers(input.members);
+    const before = await this.groups();
+    this.validateType(input.type, before);
+    const { webUi, sid } = await this.requireWebUi('group/create');
+
+    const page = await webUi.get(GROUP_CREATE_PATH, sid);
+    const draft = DRAFT_GROUP_ID.exec(page);
+    if (draft === null || draft[1] === undefined) {
+      throw new CcuManagementError(GROUP_CREATE_PATH, new ClientError('no group id in the page'));
+    }
+    const draftId = Number(draft[1]);
+    const response = await this.saveGroup(webUi, sid, {
+      groupId: draftId,
+      groupName: jsEscape(name),
+      groupTypeId: input.type,
+      forbidSingleOperation: false,
+      assignedDevicesIds: members,
+      isNewGroup: true,
+      // The WebUI sends the (still empty) virtual device serial after the name.
+      groupDeviceName: `${name} `,
+    });
+    const id = numOrNull(response) ?? draftId;
+    await this.flagMembers(members, 'true');
+    return this.verifyPresent(id, { name, type: input.type, members });
+  }
+
+  /** Change a group's name and/or member list; resolves with the group read back. */
+  public async updateGroup(id: number, patch: HmGroupUpdate): Promise<HmGroup> {
+    if (patch.name === undefined && patch.members === undefined) {
+      throw new ValidationError('updateGroup needs a name and/or members.');
+    }
+    const name = patch.name === undefined ? undefined : validateGroupName(patch.name);
+    const members = patch.members === undefined ? undefined : validateMembers(patch.members);
+    const current = await this.requireGroup(id);
+    const { webUi, sid } = await this.requireWebUi('group/save');
+
+    const nextName = name ?? current.name;
+    const nextMembers = members ?? current.members.map((m) => m.address);
+    await this.saveGroup(webUi, sid, {
+      groupId: id,
+      groupName: jsEscape(nextName),
+      groupTypeId: current.type,
+      forbidSingleOperation: current.forbidSingleOperation,
+      assignedDevicesIds: nextMembers,
+      isNewGroup: false,
+      groupDeviceName: `${nextName} ${virtualDeviceSerial(id)}`,
+    });
+    await this.flagMembers(nextMembers, 'true');
+    const kept = new Set(nextMembers);
+    await this.flagMembers(
+      current.members.map((m) => m.address).filter((a) => !kept.has(a)),
+      'false',
+    );
+    return this.verifyPresent(id, { name: nextName, type: current.type, members: nextMembers });
+  }
+
+  /** Delete a group; verified by the group being gone from the read-back. */
+  public async deleteGroup(id: number): Promise<void> {
+    const current = await this.requireGroup(id);
+    const { webUi, sid } = await this.requireWebUi('group/delete');
+    const text = await webUi.post(GROUP_DELETE_PATH, sid, JSON.stringify({ groupId: id }));
+    checkWebUiResponse(GROUP_DELETE_PATH, text);
+    await this.flagMembers(
+      current.members.map((m) => m.address),
+      'false',
+    );
+    const after = await this.groups();
+    if (after.some((g) => g.id === id)) {
+      throw new GroupWriteVerificationError(`Group ${id} is still listed after deleteGroup.`);
+    }
+  }
+
+  private async requireGroup(id: number): Promise<HmGroup> {
+    if (!Number.isInteger(id)) throw new ValidationError(`Invalid group id ${String(id)}.`);
+    const found = (await this.groups()).find((g) => g.id === id);
+    if (found === undefined) throw new ValidationError(`Unknown group ${id}.`);
+    return found;
+  }
+
+  private validateType(type: string, existing: readonly HmGroup[]): void {
+    const known = new Set<string>([...KNOWN_GROUP_TYPES, ...existing.map((g) => g.type)]);
+    if (!known.has(type)) {
+      throw new ValidationError(`Unknown group type "${type}" (known: ${[...known].join(', ')}).`);
+    }
+  }
+
+  private async requireWebUi(label: string): Promise<{ webUi: WebUiHttp; sid: string }> {
+    if (this.webUi === undefined) {
+      throw new ValidationError(
+        `${label} needs WebUI credentials (HMServer pages); none are configured.`,
+      );
+    }
+    const sid = await this.getSessionId();
+    if (sid === undefined) {
+      throw new ValidationError(`${label} needs a WebUI session.`);
+    }
+    return { webUi: this.webUi, sid };
+  }
+
+  /** POST `group/save`; returns the response `content` (the group id as text). */
+  private async saveGroup(
+    webUi: WebUiHttp,
+    sid: string,
+    payload: Record<string, string | number | boolean | string[]>,
+  ): Promise<string> {
+    const text = await webUi.post(GROUP_SAVE_PATH, sid, JSON.stringify(payload));
+    return checkWebUiResponse(GROUP_SAVE_PATH, text);
+  }
+
+  /**
+   * The WebUI marks every device it puts in / takes out of a heating group with
+   * `Interface.setMetadata inHeatingGroup` (its pages use the flag to hide
+   * grouped devices). Best effort: the hint is cosmetic and the group itself is
+   * verified separately.
+   */
+  private async flagMembers(addresses: readonly string[], value: 'true' | 'false'): Promise<void> {
+    const devices = [...new Set(addresses.map((a) => a.slice(0, a.lastIndexOf(':'))))];
+    for (const address of devices) {
+      try {
+        const objectId = await this.call(JsonRpcMethod.DEVICE_GET_REGA_ID_BY_ADDRESS, { address });
+        if (typeof objectId !== 'string' || objectId === '' || objectId === 'noDeviceFound')
+          continue;
+        await this.call(JsonRpcMethod.INTERFACE_SET_METADATA, {
+          objectId,
+          dataId: 'inHeatingGroup',
+          value,
+        });
+      } catch {
+        // cosmetic hint only
+      }
+    }
+  }
+
+  private async verifyPresent(
+    id: number,
+    want: { name: string; type: string; members: readonly string[] },
+  ): Promise<HmGroup> {
+    const found = (await this.groups()).find((g) => g.id === id);
+    if (found === undefined) {
+      throw new GroupWriteVerificationError(`Group ${id} is not listed after the write.`);
+    }
+    const have = found.members.map((m) => m.address).sort();
+    const expected = [...want.members].sort();
+    const sameMembers = have.length === expected.length && have.every((a, i) => a === expected[i]);
+    if (found.name !== want.name || found.type !== want.type || !sameMembers) {
+      throw new GroupWriteVerificationError(
+        `Group ${id} reads back as "${found.name}" (${found.type}, ${have.length} members), ` +
+          `expected "${want.name}" (${want.type}, ${expected.length} members).`,
+      );
+    }
+    return found;
   }
 
   // --- internals ---------------------------------------------------------------
@@ -450,4 +641,50 @@ function toGroup(entry: Record<string, unknown>): HmGroup | null {
     forbidSingleOperation: props['FORBID_SINGLE_OPERATION'] === true,
     members,
   };
+}
+
+/** `INT` + the id left-padded to 7 digits (`createVirtualDeviceSerialNumber`, viewmodels.js). */
+function virtualDeviceSerial(id: number): string {
+  return `INT${String(id).padStart(7, '0')}`;
+}
+
+function validateGroupName(raw: string): string {
+  const name = raw.replace(/"/g, "'").trim();
+  if (name === '' || name.length > MAX_GROUP_NAME) {
+    throw new ValidationError(`Group name must be 1..${MAX_GROUP_NAME} characters.`);
+  }
+  return name;
+}
+
+function validateMembers(members: readonly string[]): string[] {
+  for (const address of members) {
+    if (!CHANNEL_ADDRESS.test(address)) {
+      throw new ValidationError(`Invalid member channel address "${address}".`);
+    }
+  }
+  return [...new Set(members)];
+}
+
+/**
+ * Check the HMServer's `{isSuccessful, errorCode, content}` envelope. The
+ * content (HTML on failure) is never copied into the error.
+ */
+function checkWebUiResponse(path: string, text: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new CcuManagementError(path, new ClientError('response was not JSON'));
+  }
+  if (!isRecord(parsed) || parsed['isSuccessful'] !== true) {
+    const code = isRecord(parsed) ? strOrNull(parsed['errorCode']) : null;
+    throw new CcuManagementError(
+      path,
+      new ClientError(
+        code === '42' ? 'session expired (errorCode 42)' : `refused (errorCode ${code ?? 'none'})`,
+      ),
+    );
+  }
+  const content = parsed['content'];
+  return typeof content === 'string' || typeof content === 'number' ? String(content) : '';
 }

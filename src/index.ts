@@ -17,7 +17,9 @@ export { HM_DELETE_FLAGS } from './api/types.js';
 export type {
   HmCcuInfo,
   HmGroup,
+  HmGroupCreate,
   HmGroupMember,
+  HmGroupUpdate,
   HmInstallModeKind,
   HmInstallModeRequest,
   HmInterfaceInfo,

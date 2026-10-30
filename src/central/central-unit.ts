@@ -31,6 +31,7 @@ import { ClientState } from '../transport/resilience/state-machine.js';
 import { InterfaceClient } from '../transport/interface-client.js';
 import { JsonRpcClient } from '../transport/jsonrpc/client.js';
 import { SessionManager } from '../transport/jsonrpc/session.js';
+import { WebUiHttpClient, type WebUiHttp } from '../transport/webui/webui-http.js';
 import { CcuManagement } from './management/ccu-management.js';
 import { CallbackServer } from '../transport/callback-server/server.js';
 import type { RawCallbackEvent } from '../transport/callback-server/events.js';
@@ -128,6 +129,8 @@ export interface CentralUnitOptions {
   readonly makeInterfaceClient?: (iface: Interface) => InterfaceClient;
   /** Inject a JSON-RPC client (defaults to a real {@link JsonRpcClient}). */
   readonly jsonClient?: JsonRpcClientLike;
+  /** Inject the WebUI HMServer-page transport used for group writes (tests). */
+  readonly webUiClient?: WebUiHttp;
   /** Injectable clock. */
   readonly now?: () => number;
   /** Injectable recovery sleep (tests pass a near-immediate stub). */
@@ -197,6 +200,7 @@ export class CentralUnit {
   private readonly ifaceById = new Map<string, Interface>();
   private jsonClient: JsonRpcClientLike | undefined;
   private session: SessionManager | undefined;
+  private webUi: WebUiHttp | undefined;
   private callbackServer: CallbackServer | undefined;
   private router: CallbackRouter | undefined;
   private recovery: ConnectionRecovery | undefined;
@@ -317,6 +321,7 @@ export class CentralUnit {
   public getManagement(): CcuManagement {
     return new CcuManagement({
       json: this.jsonClient,
+      webUi: this.webUi,
       getSessionId: () =>
         this.session !== undefined ? this.session.ensureSession() : Promise.resolve(undefined),
       interfaceClient: (iface) => {
@@ -527,10 +532,13 @@ export class CentralUnit {
     if (this.credentials === undefined) return;
     if (this.options.jsonClient !== undefined) {
       this.jsonClient = this.options.jsonClient;
+      this.webUi = this.options.webUiClient;
     } else {
       const scheme = this.tls ? 'https' : 'http';
       const client = new JsonRpcClient({ url: `${scheme}://${this.host}` });
       this.jsonClient = client;
+      this.webUi =
+        this.options.webUiClient ?? new WebUiHttpClient({ url: `${scheme}://${this.host}` });
       this.session = new SessionManager({
         client,
         username: this.credentials.username,

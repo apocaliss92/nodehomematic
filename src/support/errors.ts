@@ -63,6 +63,12 @@ export class CcuManagementError extends BaseHomematicError {
   }
 }
 
+/**
+ * A group write was accepted by the CCU but the read-back (`groups()`) does not
+ * show the intended result (or still shows a deleted group).
+ */
+export class GroupWriteVerificationError extends BaseHomematicError {}
+
 /** A requested device/paramset description could not be found. */
 export class DescriptionNotFoundError extends BaseHomematicError {}
 

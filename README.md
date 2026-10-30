@@ -90,7 +90,7 @@ await hm.stop();
   - Pairing: `setInstallMode({ interface, on, seconds?, mode? })` (default 60 s, `mode: 'secure'` is BidCos-only), `getInstallMode(interface)` → seconds left.
   - `deleteDevice(address, flags)` with `HM_DELETE_FLAGS.RESET | FORCE | DEFER` (`0` = plain removal).
   - _WebUI:_ `serviceMessages()` (`UNREACH`, `LOWBAT`, `CONFIG_PENDING`, `STICKY_UNREACH`, … with `acknowledgeable`), `acknowledgeServiceMessage(id)`, `ccuInfo()` (version, product, serial, hostname), `groups()` (HmIP / HomeMatic heating groups with member channels).
-  - Groups are **read-only**: creating or editing a group is done by the HMServer's own WebUI pages and no documented JSON-RPC/XML-RPC method exists for it.
+  - _WebUI, undocumented:_ `createGroup({ name, type, members })`, `updateGroup(id, { name?, members? })`, `deleteGroup(id)`. No CCU API exists for these, so they replay the requests the WebUI's group pages send to the HMServer (`/pages/jpages/group/create|save|delete`, same session) and are firmware-dependent. Each write is verified by reading `groups()` back; a mismatch rejects with `GroupWriteVerificationError`.
 
 ## Notes
 

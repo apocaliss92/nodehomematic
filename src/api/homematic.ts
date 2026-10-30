@@ -54,6 +54,8 @@ import type {
   HmDataPoint,
   HmDevice,
   HmGroup,
+  HmGroupCreate,
+  HmGroupUpdate,
   HmInstallModeRequest,
   HmInterfaceInfo,
   HmProgram,
@@ -450,14 +452,37 @@ export class Homematic {
 
   /**
    * The CCU's heating groups ("Gruppen"): HmIP heating groups and HomeMatic
-   * heating groups with their member channels. READ-ONLY: group creation and
-   * editing is done by the HMServer's own WebUI pages and no JSON-RPC / XML-RPC
-   * method for it is documented, so there is no create/update/delete here.
+   * heating groups with their member channels. Writes are separate and
+   * undocumented: {@link Homematic.createGroup}, `updateGroup`, `deleteGroup`.
    * JSON-RPC `CCU.getHeatingGroupList` (eq-3/occu
    * `WebUI/www/api/methods/ccu/getheatinggrouplist.tcl`). Needs WebUI credentials.
    */
   public async groups(): Promise<HmGroup[]> {
     return this.#requireManagement().groups();
+  }
+
+  /**
+   * Create a heating group (`type` e.g. `hmip.heating.group`, `members` channel
+   * addresses). Resolves with the group as read back from the CCU; a write the
+   * read-back does not show rejects with `GroupWriteVerificationError`.
+   *
+   * UNDOCUMENTED and firmware-dependent: no CCU API exists for this, so the call
+   * reproduces the WebUI's own HMServer page requests (eq-3/occu
+   * `HMserver/opt/HMServer/pages/GroupEditPage.ftl`, `GroupListPage.ftl`).
+   * Needs WebUI credentials.
+   */
+  public async createGroup(input: HmGroupCreate): Promise<HmGroup> {
+    return this.#requireManagement().createGroup(input);
+  }
+
+  /** Rename a group and/or replace its member list (same caveats as {@link Homematic.createGroup}). */
+  public async updateGroup(id: number, patch: HmGroupUpdate): Promise<HmGroup> {
+    return this.#requireManagement().updateGroup(id, patch);
+  }
+
+  /** Delete a group, verified by the read-back (same caveats as {@link Homematic.createGroup}). */
+  public async deleteGroup(id: number): Promise<void> {
+    await this.#requireManagement().deleteGroup(id);
   }
 
   // --- device configuration (MASTER paramset) -------------------------------
