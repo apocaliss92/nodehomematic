@@ -32,15 +32,21 @@ function server(initial: GroupState[], opts: { dropWrites?: boolean } = {}) {
   const http: WebUiHttp = {
     get: (path, sid) => {
       reqs.push({ kind: 'get', path, sid });
+      // The page arrives in the HMServer envelope, with `=` written as \u003d
+      // (observed on OpenCCU 3.89); a new group's draft id is 0.
       return Promise.resolve(
-        '<html><script>self.groupId = 7;\n self.isNew = ko.observable(true);</script>',
+        '{"isSuccessful":true,"errorCode":"","content":"\u003chtml\u003e\u003cscript\u003eself.groupId \\u003d 0;\\n self.isNew \\u003d ko.observable(true);\u003c/script\u003e"}',
       );
     },
     post: (path, sid, body) => {
       reqs.push({ kind: 'post', path, sid, body });
       const data: Record<string, unknown> = JSON.parse(body);
       if (path.endsWith('/save') && !opts.dropWrites) {
-        const id = Number(data['groupId']);
+        // A new group is saved under draft id 0; the CCU assigns the next free id.
+        const id =
+          data['isNewGroup'] === true
+            ? Math.max(0, ...state.map((g) => g.id)) + 1
+            : Number(data['groupId']);
         const next: GroupState = {
           id,
           name: unescape(String(data['groupName'])),
@@ -121,7 +127,7 @@ describe('CcuManagement group writes', () => {
     const save = s.reqs[1];
     expect(save).toMatchObject({ kind: 'post', path: '/pages/jpages/group/save' });
     expect(JSON.parse(save?.body ?? '{}')).toEqual({
-      groupId: 7,
+      groupId: 0,
       groupName: 'B%FCro',
       groupTypeId: 'hmip.heating.group',
       forbidSingleOperation: false,
@@ -130,7 +136,7 @@ describe('CcuManagement group writes', () => {
       groupDeviceName: 'Büro ',
     });
     expect(group).toMatchObject({
-      id: 7,
+      id: 1, // assigned by the CCU, not the draft id
       name: 'Büro',
       members: [{ address: '000A9D89A7AF25:1' }],
     });
@@ -206,7 +212,8 @@ describe('CcuManagement group writes', () => {
     const s = server([]);
     const refusing: WebUiHttp = {
       get: (p, sid) =>
-        s.reqs.push({ kind: 'get', path: p, sid }) && Promise.resolve('self.groupId = 7;'),
+        s.reqs.push({ kind: 'get', path: p, sid }) &&
+        Promise.resolve('{"isSuccessful":true,"content":"self.groupId \\u003d 0;"}'),
       post: () =>
         Promise.resolve('{"isSuccessful":false,"errorCode":"42","content":"<html>secret</html>"}'),
     };

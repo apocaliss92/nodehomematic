@@ -355,7 +355,9 @@ export class CcuManagement {
     this.validateType(input.type, before);
     const { webUi, sid } = await this.requireWebUi('group/create');
 
-    const page = await webUi.get(GROUP_CREATE_PATH, sid);
+    // The page comes in the HMServer envelope (`=` written as =); a new
+    // group's draft id is 0 and the save answers with the id the CCU assigned.
+    const page = checkWebUiResponse(GROUP_CREATE_PATH, await webUi.get(GROUP_CREATE_PATH, sid));
     const draft = DRAFT_GROUP_ID.exec(page);
     if (draft === null || draft[1] === undefined) {
       throw new CcuManagementError(GROUP_CREATE_PATH, new ClientError('no group id in the page'));
