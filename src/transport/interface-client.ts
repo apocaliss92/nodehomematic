@@ -257,6 +257,48 @@ export class InterfaceClient {
     return this.callGuarded('getValue', [channelAddress, parameter]);
   }
 
+  /**
+   * `getLinks(channelAddress, flags)` → array of `{SENDER, RECEIVER, NAME, ...}`.
+   *
+   * aiohomematic `CcuBackend.get_links` (`client/backends/ccu.py`) →
+   * `LinkCoordinator.get_device_links` passes `flags = 0`.
+   */
+  public async getLinks(channelAddress: string, flags: number): Promise<XmlRpcValue> {
+    return this.callGuarded('getLinks', [channelAddress, flags]);
+  }
+
+  /**
+   * `getMetadata(address, dataId)` → struct.
+   *
+   * aiohomematic `CcuBackend.get_metadata`. Central-link state uses
+   * `dataId = "reportValueUsageData"`.
+   */
+  public async getMetadata(address: string, dataId: string): Promise<XmlRpcValue> {
+    return this.callGuarded('getMetadata', [address, dataId]);
+  }
+
+  /**
+   * `reportValueUsage(channelAddress, valueId, refCounter)` → bool.
+   *
+   * aiohomematic `CcuBackend.report_value_usage`:
+   * `bool(proxy.reportValueUsage(channel_address, value_id, ref_counter))`.
+   * Central links pass `valueId = "PRESS_SHORT"`, `refCounter` `1` (create) or
+   * `0` (remove). A non-boolean truthy integer `1` is accepted the same way
+   * Python `bool(1)` would.
+   */
+  public async reportValueUsage(
+    channelAddress: string,
+    valueId: string,
+    refCounter: number,
+  ): Promise<boolean> {
+    const result = await this.callGuarded('reportValueUsage', [
+      channelAddress,
+      valueId,
+      refCounter,
+    ]);
+    return result === true || result === 1;
+  }
+
   /** `setValue(channelAddress, parameter, value[, rxMode])` — wrapped in retry. */
   public async setValue(
     channelAddress: string,

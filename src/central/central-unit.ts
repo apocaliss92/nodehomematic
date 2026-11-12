@@ -394,6 +394,37 @@ export class CentralUnit {
     await client.installFirmware(deviceAddress);
   }
 
+  /** XML-RPC `getLinks(channelAddress, flags)`, routed by interface id. */
+  public async getLinks(
+    interfaceId: string,
+    channelAddress: string,
+    flags: number,
+  ): Promise<XmlRpcValue> {
+    return this.clientFor(interfaceId).getLinks(channelAddress, flags);
+  }
+
+  /** XML-RPC `getMetadata(address, dataId)`, routed by interface id. */
+  public async getMetadata(
+    interfaceId: string,
+    address: string,
+    dataId: string,
+  ): Promise<XmlRpcValue> {
+    return this.clientFor(interfaceId).getMetadata(address, dataId);
+  }
+
+  /**
+   * XML-RPC `reportValueUsage(channelAddress, valueId, refCounter)`, routed by
+   * interface id. `true` when the interface accepted the counter.
+   */
+  public async reportValueUsage(
+    interfaceId: string,
+    channelAddress: string,
+    valueId: string,
+    refCounter: number,
+  ): Promise<boolean> {
+    return this.clientFor(interfaceId).reportValueUsage(channelAddress, valueId, refCounter);
+  }
+
   /** Resolve the {@link InterfaceClient} bound to `interfaceId`, or throw. */
   private clientFor(interfaceId: string): InterfaceClient {
     const runtime = this.runtimes.get(interfaceId);

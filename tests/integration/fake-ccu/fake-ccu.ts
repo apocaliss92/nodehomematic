@@ -59,6 +59,25 @@ export interface FakeCcuOptions {
    * merged on top of the canned paramsets for this instance.
    */
   readonly extraParamsets?: Readonly<Record<string, Record<string, ParameterData>>>;
+  /**
+   * When true, `Device.listAllDetail` returns a JSON-RPC error so name reads
+   * fail. Discovery must still complete.
+   */
+  readonly failDeviceDetails?: boolean;
+}
+
+/** One `reportValueUsage` call the fake CCU has seen. */
+export interface ReportValueUsageCall {
+  readonly address: string;
+  readonly valueId: string;
+  readonly refCounter: number;
+}
+
+/** A direct link served by `getLinks`. */
+export interface FakeDirectLink {
+  readonly sender: string;
+  readonly receiver: string;
+  readonly name: string;
 }
 
 /** Records of a callback (de)registration the fake CCU has seen. */
@@ -214,6 +233,9 @@ const XML_RPC_METHODS: readonly string[] = [
   'setValue',
   'putParamset',
   'installFirmware',
+  'getLinks',
+  'getMetadata',
+  'reportValueUsage',
   'getVersion',
   'system.listMethods',
 ];
@@ -236,6 +258,16 @@ export class FakeCcu {
   private readonly programExecutions: string[] = [];
   /** Device addresses passed to `installFirmware`, in order. */
   private readonly firmwareInstalls: string[] = [];
+  /** `reportValueUsage` calls, in order (recorded even when the call faults). */
+  private readonly valueUsageCalls: ReportValueUsageCall[] = [];
+  /** `reportValueUsage` metadata, keyed by channel address → value id → counter. */
+  private readonly valueUsage = new Map<string, Record<string, number>>();
+  /** Direct links returned by `getLinks`. */
+  private readonly directLinks: FakeDirectLink[] = [];
+  /** When set, `reportValueUsage` answers with this fault string. */
+  private reportValueUsageFault: string | undefined;
+  /** When true, `Device.listAllDetail` is a JSON-RPC error. */
+  private readonly failDeviceDetails: boolean;
   /** When true, every XML-RPC request is refused (simulated outage). */
   private down = false;
   /** When true, `system.listMethods` faults (forces the getVersion fallback). */
@@ -252,6 +284,7 @@ export class FakeCcu {
     this.password = options.password ?? 'secret';
     this.devices = [...CANNED_DEVICES, ...(options.extraDevices ?? [])];
     this.paramsets = { ...CANNED_PARAMSETS, ...(options.extraParamsets ?? {}) };
+    this.failDeviceDetails = options.failDeviceDetails ?? false;
     this.httpServer = createServer((req, res) => {
       this.handleRequest(req, res);
     });
@@ -342,6 +375,24 @@ export class FakeCcu {
   /** True if `installFirmware` was called for the given device address. */
   public didInstallFirmware(deviceAddress: string): boolean {
     return this.firmwareInstalls.includes(deviceAddress);
+  }
+
+  /** `reportValueUsage` calls seen so far, in order. */
+  public reportValueUsageCalls(): readonly ReportValueUsageCall[] {
+    return [...this.valueUsageCalls];
+  }
+
+  /** Remember a direct link so a later `getLinks` returns it. */
+  public addDirectLink(link: FakeDirectLink): void {
+    this.directLinks.push({ ...link });
+  }
+
+  /**
+   * Make the next `reportValueUsage` calls fault with `message`. Pass
+   * `undefined` to accept them again.
+   */
+  public setReportValueUsageFault(message: string | undefined): void {
+    this.reportValueUsageFault = message;
   }
 
   /**
@@ -510,6 +561,12 @@ export class FakeCcu {
         return this.handlePutParamset(params);
       case 'installFirmware':
         return this.handleInstallFirmware(params);
+      case 'getLinks':
+        return this.handleGetLinks(params);
+      case 'getMetadata':
+        return this.handleGetMetadata(params);
+      case 'reportValueUsage':
+        return this.handleReportValueUsage(params);
       case 'getVersion':
         return '3.75.7';
       case 'system.listMethods':
@@ -584,6 +641,44 @@ export class FakeCcu {
     return '';
   }
 
+  private handleGetLinks(params: readonly XmlRpcValue[]): XmlRpcValue {
+    const address = asString(params[0], 'getLinks address');
+    const links = this.directLinks.filter(
+      (link) => link.sender === address || link.receiver === address,
+    );
+    return links.map((link) => ({
+      SENDER: link.sender,
+      RECEIVER: link.receiver,
+      NAME: link.name,
+      FLAGS: 0,
+    }));
+  }
+
+  private handleGetMetadata(params: readonly XmlRpcValue[]): XmlRpcValue {
+    const address = asString(params[0], 'getMetadata address');
+    const dataId = asString(params[1], 'getMetadata dataId');
+    if (dataId !== 'reportValueUsageData') return {};
+    const stored = this.valueUsage.get(address);
+    return stored === undefined ? {} : { ...stored };
+  }
+
+  private handleReportValueUsage(params: readonly XmlRpcValue[]): XmlRpcValue {
+    const address = asString(params[0], 'reportValueUsage address');
+    const valueId = asString(params[1], 'reportValueUsage valueId');
+    const refCounter = params[2];
+    const recorded = typeof refCounter === 'number' ? refCounter : Number.NaN;
+    this.valueUsageCalls.push({ address, valueId, refCounter: recorded });
+    if (this.reportValueUsageFault !== undefined) {
+      throw new Error(this.reportValueUsageFault);
+    }
+    if (typeof refCounter !== 'number') {
+      throw new Error('reportValueUsage refCounter must be an integer');
+    }
+    const previous = this.valueUsage.get(address) ?? {};
+    this.valueUsage.set(address, { ...previous, [valueId]: refCounter });
+    return true;
+  }
+
   private handleInstallFirmware(params: readonly XmlRpcValue[]): XmlRpcValue {
     const address = asString(params[0], 'installFirmware address');
     this.firmwareInstalls.push(address);
@@ -643,6 +738,9 @@ export class FakeCcu {
       case 'Session.logout':
         return { result: true, error: null };
       case 'Device.listAllDetail':
+        if (this.failDeviceDetails) {
+          return { result: null, error: { code: -32603, message: 'internal error' } };
+        }
         return { result: CANNED_DEVICE_DETAIL, error: null };
       case 'Room.getAll':
         return { result: CANNED_ROOMS, error: null };

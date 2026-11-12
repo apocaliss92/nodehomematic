@@ -27,6 +27,8 @@ export type {
   HmServiceMessage,
   HmDevice,
   HmChannel,
+  HmChannelLink,
+  HmChannelLinkState,
   HmDataPoint,
   HmValue,
   HmConfigParam,

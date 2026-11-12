@@ -203,16 +203,17 @@ function buildChannel(
     }
   }
 
+  const name = details?.nameByAddress.get(channelAddress);
   const node: ChannelNode = {
     address: channelAddress,
     index: channelIndexOf(channelAddress),
     parameters,
     ...(desc?.TYPE !== undefined ? { type: desc.TYPE } : {}),
     ...(desc?.DIRECTION !== undefined ? { direction: desc.DIRECTION } : {}),
+    // Channel names come from the same `Device.listAllDetail` map as the device
+    // name (keyed by channel address). Rooms/functions stay on the device node.
+    ...(name !== undefined ? { name } : {}),
   };
-  // name/rooms/functions live on the device node; channel-level details, when
-  // present, are intentionally not surfaced on ChannelNode (graph.ts shape).
-  void details;
   return node;
 }
 

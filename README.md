@@ -7,7 +7,8 @@ Node.js/TypeScript port of [aiohomematic](https://github.com/sukramj/aiohomemati
 ## Features
 
 - XML-RPC connection to the CCU interfaces: **HmIP-RF, BidCos-RF, VirtualDevices** (groups, on the `/groups` path).
-- JSON-RPC client to the CCU WebUI (names, system variables, programs) + ReGa scripts (rooms/functions, descriptions).
+- JSON-RPC client to the CCU WebUI (device and channel names, system variables, programs) + ReGa scripts (rooms/functions, descriptions).
+- **Central links** for button channels (`reportValueUsage` / `PRESS_SHORT`), so `PRESS_*` events reach the client, plus `getLinks` for direct links.
 - Callback server to receive event push notifications from the CCU.
 - **Rock-solid** reconnection (health-ping + ping/pong + re-init with backoff + value re-sync).
 - Automatic discovery of devices, channels and data points + persistent description cache + seeding of initial values at startup.
@@ -49,10 +50,18 @@ hm.on('ready', () => console.log('discovery complete'));
 
 await hm.start();
 
-// Snapshot of the devices (with channels, data points and current values)
+// Snapshot of the devices (with channels, data points and current values).
+// `name` is the CCU name, or null when the CCU has none or the read failed.
 for (const d of hm.devices()) {
   console.log(d.address, d.type, d.name);
+  for (const ch of d.channels) console.log(' ', ch.address, ch.name);
 }
+
+// Button channels only push PRESS_* once they have a central link.
+const key = '001B9D89A09163:1';
+await hm.createCentralLink(key); // no-op if it already exists
+console.log(await hm.getChannelLinkState(key)); // { central, links }
+await hm.removeCentralLink(key);
 
 // Read / write a data point (explicit form or by id)
 const v = hm.getValue({ device: 'VCU0000001', channel: 1, parameter: 'STATE' });
@@ -80,7 +89,8 @@ await hm.stop();
 
 - **Lifecycle:** `start()`, `stop()`.
 - **Events** (`on`/`once`/`off`): `valueChanged`, `deviceAdded`, `deviceRemoved`, `connection`, `ready`, `error`.
-- **State:** `devices()`, `getValue(ref)`, `setValue(ref, value)` (`ref` = data point id or `{ device, channel, parameter }`).
+- **State:** `devices()`, `getValue(ref)`, `setValue(ref, value)` (`ref` = data point id or `{ device, channel, parameter }`). `HmDevice.name` and `HmChannel.name` are `string | null` (CCU `Device.listAllDetail`; `null` if the CCU has no name or the read failed — never the address). A failed name read does not fail `start()`.
+- **Links:** `getChannelLinkState(channelAddress)` → `{ central, links: { sender, receiver, name }[] }`. `central` is XML-RPC `getMetadata(address, "reportValueUsageData")` with `PRESS_SHORT > 0`. `links` is `getLinks(address, 0)`. `createCentralLink(channelAddress)` sends `reportValueUsage(address, "PRESS_SHORT", 1)` and is a no-op when a central link already exists. `removeCentralLink(channelAddress)` sends ref counter `0` and is a no-op when none exists. The same calls are used on HmIP-RF and BidCos-RF. A refusal is a `ClientError`.
 - **Custom entities:** `customEntities()` + commands `climateSetTemperature/climateSetMode/climateSetBoost`, `switchTurnOn/Off`, `lightTurnOn/Off/SetBrightness`, `coverOpen/Close/Stop/SetPosition`, `lockLock/Unlock/Open`.
 - **Device config:** `getConfigParams(channelAddress)`, `getConfig(channelAddress)`, `setConfig(channelAddress, values)`.
 - **Hub:** `systemVariables()`, `getSystemVariable(name)`, `setSystemVariable(name, value)`, `programs()`, `runProgram(idOrName)`, `setProgramActive(idOrName, active)`, `refreshHub()`.

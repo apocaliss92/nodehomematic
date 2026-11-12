@@ -50,6 +50,7 @@ function buildChannel(
     address: channel.address,
     index: channel.index,
     ...(channel.type !== undefined ? { type: channel.type } : {}),
+    ...(channel.name !== undefined ? { name: channel.name } : {}),
     dataPoints,
   });
 }

@@ -222,6 +222,8 @@ describe('central/discovery discoverInterface', () => {
     expect(nodes[0].name).toBe('Front Door');
     expect(nodes[0].rooms).toContain('Kitchen');
     expect(nodes[0].functions).toContain('Security');
+    const contact = nodes[0].channels.find((channel) => channel.address === 'VCU0000001:1');
+    expect(contact?.name).toBe('Contact');
   });
 });
 

@@ -82,6 +82,8 @@ export interface ChannelNode {
   readonly index: number;
   readonly type?: string;
   readonly direction?: number;
+  /** CCU user-given name (`Device.listAllDetail`). Absent when the CCU has none. */
+  readonly name?: string;
   readonly parameters: ReadonlyMap<string, ParameterSpecs>;
 }
 

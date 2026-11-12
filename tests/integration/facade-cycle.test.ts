@@ -97,6 +97,9 @@ describe('facade cycle (fake CCU, real central + transport modules)', () => {
     expect(device.type).toBe('HmIP-SWDO');
     expect(device.name).toBe('Window Contact');
     const channel1 = device.channels.find((c) => c.address === 'VCU0000001:1')!;
+    expect(channel1.name).toBe('Window Contact Sensor');
+    const maintenance = device.channels.find((c) => c.address === 'VCU0000001:0')!;
+    expect(maintenance.name).toBeNull();
     const params = channel1.dataPoints.map((dp) => dp.parameter).sort();
     expect(params).toEqual(['LEVEL', 'STATE']);
     const state = channel1.dataPoints.find((dp) => dp.parameter === 'STATE')!;

@@ -31,14 +31,40 @@ export interface HmChannel {
   readonly address: string;
   readonly index: number;
   readonly type?: string;
+  /**
+   * CCU user-given channel name from JSON-RPC `Device.listAllDetail`.
+   * `null` when the CCU has none or the name read failed — never the address.
+   */
+  readonly name: string | null;
   readonly dataPoints: readonly HmDataPoint[];
+}
+
+/** One direct device link from XML-RPC `getLinks` (`SENDER` / `RECEIVER` / `NAME`). */
+export interface HmChannelLink {
+  readonly sender: string;
+  readonly receiver: string;
+  readonly name: string;
+}
+
+/**
+ * Central-link flag plus the direct links of one channel.
+ * `central` is `getMetadata("reportValueUsageData").PRESS_SHORT > 0`, not a
+ * peer inside `links`.
+ */
+export interface HmChannelLinkState {
+  readonly central: boolean;
+  readonly links: readonly HmChannelLink[];
 }
 
 /** A public snapshot of a single device. */
 export interface HmDevice {
   readonly address: string;
   readonly type: string;
-  readonly name?: string;
+  /**
+   * CCU user-given device name from JSON-RPC `Device.listAllDetail`.
+   * `null` when the CCU has none or the name read failed — never the address.
+   */
+  readonly name: string | null;
   readonly rooms?: readonly string[];
   readonly functions?: readonly string[];
   /** Installed firmware version, e.g. `1.18.24` (CCU descriptor `FIRMWARE`). */

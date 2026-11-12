@@ -23,13 +23,27 @@ import type { StorageBackend } from '../central/store/storage-backend.js';
 import type { DeviceNode } from '../central/graph.js';
 import type { ParameterData } from '../transport/xmlrpc/types.js';
 import { Interface, ParamsetKey, isWritable } from '../support/constants.js';
-import { ValidationError, DescriptionNotFoundError } from '../support/errors.js';
+import {
+  BaseHomematicError,
+  ClientError,
+  ValidationError,
+  DescriptionNotFoundError,
+} from '../support/errors.js';
 import { makeDpk, dpkToUniqueId, type DataPointKey } from '../support/dpk.js';
 import { buildModel, buildDevice, interfaceFamilyOf } from '../model/model-builder.js';
 import { GenericDataPoint } from '../model/data-point.js';
 import { convertFromCcu, convertToCcu } from '../model/converter.js';
 import { parameterSpecFromData } from '../central/graph.js';
 import type { ModelDevice } from '../model/device.js';
+import {
+  GET_LINKS_FLAGS,
+  REPORT_VALUE_USAGE_DATA,
+  REPORT_VALUE_USAGE_REF_CREATE,
+  REPORT_VALUE_USAGE_REF_REMOVE,
+  REPORT_VALUE_USAGE_VALUE_ID,
+  metadataHasCentralLink,
+  parseChannelLinks,
+} from './central-link.js';
 import {
   buildCustomEntities,
   CustomEntity,
@@ -49,6 +63,7 @@ import type {
   DataPointRef,
   HmCcuInfo,
   HmChannel,
+  HmChannelLinkState,
   HmConfigParam,
   HmCustomEntity,
   HmDataPoint,
@@ -372,6 +387,82 @@ export class Homematic {
       throw new ValidationError(`Unknown device "${deviceAddress}".`);
     }
     await this.#central.installFirmware(device.interfaceId, deviceAddress);
+  }
+
+  /**
+   * Direct links of one channel, plus whether it has a central link.
+   *
+   * `links` is XML-RPC `getLinks(address, 0)` (`SENDER`, `RECEIVER`, `NAME`),
+   * as read by aiohomematic `LinkCoordinator.get_device_links`
+   * (`aiohomematic/central/coordinators/link.py`). `central` is
+   * `Channel._has_central_link` (`aiohomematic/model/device.py`):
+   * `getMetadata(address, "reportValueUsageData")` with `PRESS_SHORT > 0`.
+   * A metadata fault yields `central: false` and does not fail the call; a
+   * `getLinks` fault is a {@link ClientError}.
+   */
+  public async getChannelLinkState(channelAddress: string): Promise<HmChannelLinkState> {
+    const device = this.#requireKnownChannel(channelAddress);
+    const raw = await this.#central.getLinks(device.interfaceId, channelAddress, GET_LINKS_FLAGS);
+    const central = await this.#hasCentralLink(device.interfaceId, channelAddress);
+    return { central, links: parseChannelLinks(raw) };
+  }
+
+  /**
+   * Create the central link for one channel so the CCU pushes `PRESS_*` to
+   * this client. Idempotent: when a central link already exists this returns
+   * without a second call.
+   *
+   * Protocol: aiohomematic `Channel.create_central_link`
+   * (`aiohomematic/model/device.py`) → `CcuBackend.report_value_usage`
+   * (`aiohomematic/client/backends/ccu.py`) sends
+   * `reportValueUsage(channelAddress, "PRESS_SHORT", 1)` on that channel's
+   * interface. HmIP-RF and BidCos-RF use this same call; it is not `addLink`
+   * to a central address. The value id and ref counter are
+   * `REPORT_VALUE_USAGE_VALUE_ID` (`"PRESS_SHORT"`) and `1` in
+   * `aiohomematic/const.py`. A `false` result or an XML-RPC fault is a
+   * {@link ClientError}.
+   *
+   * aiohomematic only does this for channels with key-press events. This
+   * method does it for any known channel address.
+   */
+  public async createCentralLink(channelAddress: string): Promise<void> {
+    const device = this.#requireKnownChannel(channelAddress);
+    if (await this.#hasCentralLink(device.interfaceId, channelAddress)) return;
+    const accepted = await this.#central.reportValueUsage(
+      device.interfaceId,
+      channelAddress,
+      REPORT_VALUE_USAGE_VALUE_ID,
+      REPORT_VALUE_USAGE_REF_CREATE,
+    );
+    if (!accepted) {
+      throw new ClientError(`reportValueUsage refused for channel "${channelAddress}".`);
+    }
+  }
+
+  /**
+   * Remove the central link for one channel. Idempotent: when none exists this
+   * returns without a call.
+   *
+   * Protocol: aiohomematic `Channel.remove_central_link`
+   * (`aiohomematic/model/device.py`) sends
+   * `reportValueUsage(channelAddress, "PRESS_SHORT", 0)`. That method also
+   * skips the call when JSON-RPC `Channel.hasProgramIds` is true
+   * (`client/json_rpc.py` `has_program_ids`); this method does not, and clears
+   * the link whenever the metadata counter is `> 0`. A `false` result or an
+   * XML-RPC fault is a {@link ClientError}.
+   */
+  public async removeCentralLink(channelAddress: string): Promise<void> {
+    const device = this.#requireKnownChannel(channelAddress);
+    if (!(await this.#hasCentralLink(device.interfaceId, channelAddress))) return;
+    const accepted = await this.#central.reportValueUsage(
+      device.interfaceId,
+      channelAddress,
+      REPORT_VALUE_USAGE_VALUE_ID,
+      REPORT_VALUE_USAGE_REF_REMOVE,
+    );
+    if (!accepted) {
+      throw new ClientError(`reportValueUsage refused for channel "${channelAddress}".`);
+    }
   }
 
   // --- CCU management ---------------------------------------------------------
@@ -1068,6 +1159,37 @@ export class Homematic {
     return this.#hub;
   }
 
+  /** Throw unless `start()` has run and `channelAddress` is a known channel. */
+  #requireKnownChannel(channelAddress: string): ModelDevice {
+    if (!this.#started) {
+      throw new ValidationError('Homematic is not started; call start() first.');
+    }
+    const deviceAddress = deviceAddressOf(channelAddress);
+    const device = this.#devicesByAddress.get(deviceAddress);
+    if (device === undefined || device.channel(channelAddress) === undefined) {
+      throw new ValidationError(`Unknown channel "${channelAddress}".`);
+    }
+    return device;
+  }
+
+  /**
+   * `Channel._has_central_link`: metadata `PRESS_SHORT > 0`. A metadata fault
+   * is "no central link" (aiohomematic catches `BaseHomematicException` here).
+   */
+  async #hasCentralLink(interfaceId: string, channelAddress: string): Promise<boolean> {
+    try {
+      const metadata = await this.#central.getMetadata(
+        interfaceId,
+        channelAddress,
+        REPORT_VALUE_USAGE_DATA,
+      );
+      return metadataHasCentralLink(metadata);
+    } catch (err: unknown) {
+      if (err instanceof BaseHomematicError) return false;
+      throw err;
+    }
+  }
+
   /** Find the interfaceId owning a channel via its parent device. */
   #interfaceIdForChannel(channelAddress: string): string {
     const deviceAddress = deviceAddressOf(channelAddress);
@@ -1191,6 +1313,7 @@ function toHmDevice(
     address: channel.address,
     index: channel.index,
     ...(channel.type !== undefined ? { type: channel.type } : {}),
+    name: channel.name ?? null,
     dataPoints: channel.dataPoints.map(toHmDataPoint),
   }));
   const rooms = unionStrings(device.rooms, hubRooms);
@@ -1198,7 +1321,7 @@ function toHmDevice(
   return {
     address: device.address,
     type: device.type,
-    ...(device.name !== undefined ? { name: device.name } : {}),
+    name: device.name ?? null,
     ...(rooms !== undefined ? { rooms } : {}),
     ...(functions !== undefined ? { functions } : {}),
     ...(device.firmware !== undefined ? { firmware: device.firmware } : {}),

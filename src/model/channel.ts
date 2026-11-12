@@ -12,6 +12,8 @@ export interface ModelChannelInit {
   readonly address: string;
   readonly index: number;
   readonly type?: string;
+  /** CCU user-given name. Absent when the CCU has none or the name read failed. */
+  readonly name?: string;
   readonly dataPoints: readonly GenericDataPoint[];
 }
 
@@ -19,6 +21,7 @@ export class ModelChannel {
   public readonly address: string;
   public readonly index: number;
   public readonly type?: string;
+  public readonly name?: string;
   public readonly dataPoints: readonly GenericDataPoint[];
 
   readonly #byParameter: ReadonlyMap<string, GenericDataPoint>;
@@ -28,6 +31,9 @@ export class ModelChannel {
     this.index = init.index;
     if (init.type !== undefined) {
       this.type = init.type;
+    }
+    if (init.name !== undefined) {
+      this.name = init.name;
     }
     this.dataPoints = init.dataPoints;
     this.#byParameter = new Map(init.dataPoints.map((dp) => [dp.parameter, dp]));
