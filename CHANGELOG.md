@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Key event programs for HmIP: `ensureKeyEventProgram`, `getKeyEventProgram` and `removeKeyEventProgram`. A HmIP device sends key presses to the access point only while a CCU program uses the key; `ensureKeyEventProgram` creates (or rewrites, idempotent by name) a program whose conditions are `PRESS_SHORT` / `PRESS_LONG` on update of the given channels, with no destination. ReGa scripts modelled on eq-3/occu `WebUI/bin/hm_autoconf` and `rega/esp/{sico,programs}.fn`; unverified against a live CCU.
+
 ## 0.6.0
 
 ### Added

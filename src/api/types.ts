@@ -129,7 +129,34 @@ export interface HmRoom {
   readonly channels: readonly string[];
 }
 
+/** Key press parameters a key event program listens to. */
+export type HmKeyEventParameter = 'PRESS_SHORT' | 'PRESS_LONG';
+
+/** Input of {@link Homematic.ensureKeyEventProgram}. */
+export interface HmKeyEventProgramInput {
+  /** Program name; the program is found by it. */
+  readonly name: string;
+  /** Key channels (`DEV:1`), all on one interface. */
+  readonly channelAddresses: readonly string[];
+  /** Defaults to `PRESS_SHORT` and `PRESS_LONG`. */
+  readonly parameters?: readonly HmKeyEventParameter[];
+}
+
+/** Result of {@link Homematic.ensureKeyEventProgram}. */
+export interface HmKeyEventProgramResult {
+  readonly programId: string;
+  /** `true` when the program did not exist before. */
+  readonly created: boolean;
+}
+
+/** A key event program as found on the CCU. */
+export interface HmKeyEventProgram {
+  readonly programId: string;
+  readonly channelAddresses: string[];
+}
+
 /** A public snapshot of a single device. */
+
 export interface HmDevice {
   readonly address: string;
   readonly type: string;

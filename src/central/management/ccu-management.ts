@@ -34,6 +34,7 @@ import { JsonRpcMethod } from '../../transport/jsonrpc/methods.js';
 import type { InstallModeCall, RadioGatewayInfo } from '../../transport/interface-client.js';
 import { decodeRegaName, runScript, type RegaPostClient } from '../rega/rega-runner.js';
 import { CcuTopology } from './ccu-topology.js';
+import { CcuKeyPrograms } from './ccu-key-programs.js';
 import {
   ACKNOWLEDGE_SERVICE_MESSAGE,
   GET_CCU_PLATFORM,
@@ -514,6 +515,11 @@ export class CcuManagement {
   /** Device/channel names and rooms over ReGa, on this service's session. */
   public topology(): CcuTopology {
     return new CcuTopology((label, script, params) => this.rega(label, script, params));
+  }
+
+  /** The key-event program service (HmIP key presses), on this service's session. */
+  public keyPrograms(): CcuKeyPrograms {
+    return new CcuKeyPrograms((label, script, params) => this.rega(label, script, params));
   }
 
   // --- internals ---------------------------------------------------------------

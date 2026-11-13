@@ -1,0 +1,153 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`key event program scripts > ensure: the substituted script matches the fixture 1`] = `
+"! nodehomematic:ensureKeyEventProgram
+string sName = "CamStack: Hall events";
+object oPrograms = dom.GetObject(ID_PROGRAMS);
+object oProg;
+string sPid;
+foreach(sPid, oPrograms.EnumUsedIDs()) {
+    object oCand = dom.GetObject(sPid);
+    if (oCand) {
+        if (oCand.Name() == sName) {
+            oProg = oCand;
+        }
+    }
+}
+string sMissing = "";
+string sMissSep = "";
+object oDp0 = dom.GetObject("HmIP-RF.00315F298E5093:1.PRESS_SHORT");
+if (!oDp0) {
+    sMissing = sMissing # sMissSep # "\\"HmIP-RF.00315F298E5093:1.PRESS_SHORT\\"";
+    sMissSep = ",";
+}
+object oDp1 = dom.GetObject("HmIP-RF.00315F298E5093:1.PRESS_LONG");
+if (!oDp1) {
+    sMissing = sMissing # sMissSep # "\\"HmIP-RF.00315F298E5093:1.PRESS_LONG\\"";
+    sMissSep = ",";
+}
+object oDp2 = dom.GetObject("HmIP-RF.00315F298E5093:2.PRESS_SHORT");
+if (!oDp2) {
+    sMissing = sMissing # sMissSep # "\\"HmIP-RF.00315F298E5093:2.PRESS_SHORT\\"";
+    sMissSep = ",";
+}
+if (sMissing != "") {
+    Write("{\\"error\\":\\"datapoint\\",\\"missing\\":[" # sMissing # "]}");
+} else {
+    boolean bCreated = false;
+    if (!oProg) {
+        oProg = dom.CreateObject(OT_PROGRAM);
+        oProg.Name(sName);
+        oPrograms.Add(oProg.ID());
+        bCreated = true;
+    }
+    object oRule = oProg.Rule();
+    oRule.RuleOperatorType(2);
+    integer iCnt = oRule.RuleConditions().Count();
+    while (iCnt > 0) {
+        object oOld = oRule.RuleCondition(0);
+        oRule.RuleDelCondition(oOld.ID());
+        iCnt = iCnt - 1;
+    }
+    object oCnd = oRule.RuleAddCondition();
+    oCnd.CndOperatorType(2);
+    object oSc;
+oSc = oCnd.CndAddSingle();
+oSc.OperatorType(1);
+oSc.ConditionType(1);
+oSc.ConditionType2(13);
+oSc.LeftValType(ivtObjectId);
+oSc.LeftVal(oDp0.ID());
+oSc.ConditionChannel(oDp0.Channel());
+oSc = oCnd.CndAddSingle();
+oSc.OperatorType(1);
+oSc.ConditionType(1);
+oSc.ConditionType2(13);
+oSc.LeftValType(ivtObjectId);
+oSc.LeftVal(oDp1.ID());
+oSc.ConditionChannel(oDp1.Channel());
+oSc = oCnd.CndAddSingle();
+oSc.OperatorType(1);
+oSc.ConditionType(1);
+oSc.ConditionType2(13);
+oSc.LeftValType(ivtObjectId);
+oSc.LeftVal(oDp2.ID());
+oSc.ConditionChannel(oDp2.Channel());
+    oProg.Internal(false);
+    oProg.Active(true);
+    dom.RTUpdate(0);
+    Write("{\\"programId\\":\\"");
+    Write(oProg.ID());
+    Write("\\",\\"created\\":");
+    if (bCreated) {
+        Write("true");
+    } else {
+        Write("false");
+    }
+    Write("}");
+}"
+`;
+
+exports[`key event program scripts > remove and get: substituted script fixtures 1`] = `
+"! nodehomematic:removeKeyEventProgram
+string sName = "P";
+object oPrograms = dom.GetObject(ID_PROGRAMS);
+object oProg;
+string sPid;
+foreach(sPid, oPrograms.EnumUsedIDs()) {
+    object oCand = dom.GetObject(sPid);
+    if (oCand) {
+        if (oCand.Name() == sName) {
+            oProg = oCand;
+        }
+    }
+}
+if (oProg) {
+    dom.DeleteObject(oProg.ID());
+    Write("{\\"removed\\":true}");
+} else {
+    Write("{\\"removed\\":false}");
+}"
+`;
+
+exports[`key event program scripts > remove and get: substituted script fixtures 2`] = `
+"! nodehomematic:getKeyEventProgram
+string sName = "P";
+object oPrograms = dom.GetObject(ID_PROGRAMS);
+object oProg;
+string sPid;
+foreach(sPid, oPrograms.EnumUsedIDs()) {
+    object oCand = dom.GetObject(sPid);
+    if (oCand) {
+        if (oCand.Name() == sName) {
+            oProg = oCand;
+        }
+    }
+}
+if (!oProg) {
+    Write("{\\"found\\":false}");
+} else {
+    Write("{\\"found\\":true,\\"programId\\":\\"");
+    Write(oProg.ID());
+    Write("\\",\\"datapoints\\":[");
+    object oCnd = oProg.Rule().RuleCondition(0);
+    if (oCnd) {
+        integer iN = oCnd.CndSingleCount();
+        integer iI = 0;
+        string sSep = "";
+        while (iI < iN) {
+            object oSc = oCnd.CndSingleCondition(iI);
+            object oDp = dom.GetObject(oSc.LeftVal());
+            if (oDp) {
+                Write(sSep);
+                Write("\\"");
+                Write(oDp.Name());
+                Write("\\"");
+                sSep = ",";
+            }
+            iI = iI + 1;
+        }
+    }
+    Write("]}");
+}"
+`;

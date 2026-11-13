@@ -52,6 +52,7 @@ import {
   type ParsedLink,
 } from './link-profile.js';
 import type { CcuTopology } from '../central/management/ccu-topology.js';
+import { interfaceNameOf } from '../central/management/ccu-key-programs.js';
 import {
   buildCustomEntities,
   CustomEntity,
@@ -88,6 +89,9 @@ import type {
   HmGroupCreate,
   HmGroupUpdate,
   HmInstallModeRequest,
+  HmKeyEventProgram,
+  HmKeyEventProgramInput,
+  HmKeyEventProgramResult,
   HmInterfaceInfo,
   HmProgram,
   HmServiceMessage,
@@ -505,6 +509,46 @@ export class Homematic {
     if (!accepted) {
       throw new ClientError(`reportValueUsage refused for channel "${channelAddress}".`);
     }
+  }
+
+  // --- key event program (HmIP) -------------------------------------------------
+
+  /**
+   * Make the CCU USE the given keys so a HmIP device sends their presses to the
+   * access point: create the program `input.name`, or rewrite its conditions to
+   * exactly `channelAddresses` x `parameters` (default short and long press).
+   * Idempotent by name. The program has no destination; it exists only so the
+   * CCU subscribes to the key data points (ReGa scripts and their eq-3/occu
+   * sources: `central/rega/key-event-program.ts`). All channels must be on one
+   * interface and the CCU must have their data points; a missing one is a
+   * {@link ValidationError} naming it. Needs WebUI credentials.
+   */
+  public async ensureKeyEventProgram(
+    input: HmKeyEventProgramInput,
+  ): Promise<HmKeyEventProgramResult> {
+    if (input.channelAddresses.length === 0) {
+      throw new ValidationError('ensureKeyEventProgram needs at least one channel.');
+    }
+    const interfaces = new Set(
+      input.channelAddresses.map((address) =>
+        interfaceNameOf(this.#requireKnownChannel(address).interfaceId),
+      ),
+    );
+    const [iface] = [...interfaces];
+    if (interfaces.size !== 1 || iface === undefined) {
+      throw new ValidationError('The key channels of one program must share an interface.');
+    }
+    return this.#requireManagement().keyPrograms().ensure(iface, input);
+  }
+
+  /** Delete the key event program `name`; `removed: false` when it does not exist. Needs WebUI credentials. */
+  public async removeKeyEventProgram(name: string): Promise<{ removed: boolean }> {
+    return this.#requireManagement().keyPrograms().remove(name);
+  }
+
+  /** The key event program `name` and the channels it listens to, or `null`. Needs WebUI credentials. */
+  public async getKeyEventProgram(name: string): Promise<HmKeyEventProgram | null> {
+    return this.#requireManagement().keyPrograms().get(name);
   }
 
   // --- direct links + switch link profiles ------------------------------------
