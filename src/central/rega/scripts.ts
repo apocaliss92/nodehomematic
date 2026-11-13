@@ -216,3 +216,262 @@ Write(sRelease.UriEncode());
 Write("\\",\\"host\\":\\"");
 Write(sHost.UriEncode());
 Write("\\"}");`;
+
+// --- names and rooms ---------------------------------------------------------
+//
+// Each script below starts with a `! nodehomematic:<op>` comment line (a ReGa
+// comment) naming the operation, and declares its inputs as `string sX =
+// "##x##";` lines so the substituted values are plain, escaped string literals.
+// Names are written back `UriEncode`d (latin1) and decoded by `decodeRegaName`.
+
+/**
+ * Rename a device and, when `##channels##` is `1`, every channel of it to
+ * `<name>:<channel number>`. The lookup by address is Device.getReGaIDByAddress
+ * (eq-3/occu `WebUI/www/api/methods/device/getregaidbyaddress.tcl`); the write
+ * is `Name()` as in `device/setname.tcl` and `channel/setname.tcl`, which also
+ * read the name back because the CCU keeps names unique.
+ *
+ * Emits `{"ok":false}` for an unknown address, else
+ * `{"ok":true,"name":<enc>,"channels":[{"address","name":<enc>},...]}`.
+ */
+export const RENAME_DEVICE = `! nodehomematic:renameDevice
+string sAddress = "##address##";
+string sName = "##name##";
+string sChannels = "##channels##";
+string sId;
+string sDevId = "";
+string sSep = "";
+foreach(sId, root.Devices().EnumIDs()) {
+    object oTmp = dom.GetObject(sId);
+    if (oTmp) {
+        if (oTmp.Address() == sAddress) {
+            sDevId = sId;
+        }
+    }
+}
+if (sDevId == "") {
+    Write("{\\"ok\\":false}");
+} else {
+    object oDev = dom.GetObject(sDevId);
+    oDev.Name(sName);
+    Write("{\\"ok\\":true,\\"name\\":\\"");
+    Write(oDev.Name().UriEncode());
+    Write("\\",\\"channels\\":[");
+    if (sChannels == "1") {
+        foreach(sId, oDev.Channels().EnumUsedIDs()) {
+            object oChn = dom.GetObject(sId);
+            if (oChn) {
+                oChn.Name(sName # ":" # oChn.ChnNumber());
+                Write(sSep);
+                Write("{\\"address\\":\\"");
+                Write(oChn.Address());
+                Write("\\",\\"name\\":\\"");
+                Write(oChn.Name().UriEncode());
+                Write("\\"}");
+                sSep = ",";
+            }
+        }
+    }
+    Write("]}");
+}`;
+
+/**
+ * Rename one channel (eq-3/occu `WebUI/www/api/methods/channel/setname.tcl`),
+ * found by address among `ID_CHANNELS`. Emits `{"ok":false}` or
+ * `{"ok":true,"name":<enc>}`.
+ */
+export const RENAME_CHANNEL = `! nodehomematic:renameChannel
+string sAddress = "##address##";
+string sName = "##name##";
+string sId;
+string sChnId = "";
+foreach(sId, dom.GetObject(ID_CHANNELS).EnumUsedIDs()) {
+    object oTmp = dom.GetObject(sId);
+    if (oTmp) {
+        if (oTmp.Address() == sAddress) {
+            sChnId = sId;
+        }
+    }
+}
+if (sChnId == "") {
+    Write("{\\"ok\\":false}");
+} else {
+    object oChn = dom.GetObject(sChnId);
+    oChn.Name(sName);
+    Write("{\\"ok\\":true,\\"name\\":\\"");
+    Write(oChn.Name().UriEncode());
+    Write("\\"}");
+}`;
+
+/**
+ * Every room with its member channels by ADDRESS:
+ * `[{"id":"<id>","name":<enc>,"channels":["DEV:1",...]},...]`. Same walk as
+ * Room.getAll (eq-3/occu `WebUI/www/api/methods/room/getall.tcl`:
+ * `ID_ROOMS` → `EnumUsedIDs()`), which answers ReGa ids instead of addresses.
+ */
+export const LIST_ROOMS = `! nodehomematic:listRooms
+string sRoomId;
+string sChnId;
+string sRoomSep = "";
+string sChnSep = "";
+Write("[");
+foreach(sRoomId, dom.GetObject(ID_ROOMS).EnumUsedIDs()) {
+    object oRoom = dom.GetObject(sRoomId);
+    if (oRoom) {
+        Write(sRoomSep);
+        Write("{\\"id\\":\\"");
+        Write(oRoom.ID());
+        Write("\\",\\"name\\":\\"");
+        Write(oRoom.Name().UriEncode());
+        Write("\\",\\"channels\\":[");
+        sChnSep = "";
+        foreach(sChnId, oRoom.EnumUsedIDs()) {
+            object oChn = dom.GetObject(sChnId);
+            if (oChn) {
+                if (oChn.IsTypeOf(OT_CHANNEL)) {
+                    Write(sChnSep);
+                    Write("\\"");
+                    Write(oChn.Address());
+                    Write("\\"");
+                    sChnSep = ",";
+                }
+            }
+        }
+        Write("]}");
+        sRoomSep = ",";
+    }
+}
+Write("]");`;
+
+/**
+ * Create a room: eq-3/occu `WebUI/www/rega/esp/rooms.fn` `::createRoomRetId`
+ * (`dom.CreateObject(OT_ENUM, name)`, `EnumType(etRoom)`, add to `ID_ROOMS`,
+ * delete the object again when the add fails). A room of the same name is
+ * refused first. Emits `{"id":"<id>","name":<enc>}`, `{"error":"exists"}` or
+ * `{"error":"failed"}`.
+ */
+export const CREATE_ROOM = `! nodehomematic:createRoom
+string sName = "##name##";
+string sId;
+boolean bExists = false;
+foreach(sId, dom.GetObject(ID_ROOMS).EnumUsedIDs()) {
+    object oTmp = dom.GetObject(sId);
+    if (oTmp) {
+        if (oTmp.Name() == sName) {
+            bExists = true;
+        }
+    }
+}
+if (bExists) {
+    Write("{\\"error\\":\\"exists\\"}");
+} else {
+    object oRoom = dom.CreateObject(OT_ENUM, sName);
+    if (oRoom) {
+        oRoom.EnumType(etRoom);
+        boolean bAdded = dom.GetObject(ID_ROOMS).Add(oRoom);
+        if (bAdded) {
+            Write("{\\"id\\":\\"");
+            Write(oRoom.ID());
+            Write("\\",\\"name\\":\\"");
+            Write(oRoom.Name().UriEncode());
+            Write("\\"}");
+        } else {
+            dom.DeleteObject(oRoom.ID());
+            Write("{\\"error\\":\\"failed\\"}");
+        }
+    } else {
+        Write("{\\"error\\":\\"failed\\"}");
+    }
+}`;
+
+/**
+ * Rename a room (eq-3/occu `WebUI/www/rega/esp/rooms.fn` `::changeRoomName`),
+ * only when `##id##` is a member of `ID_ROOMS`. Emits `{"ok":true|false}`.
+ */
+export const RENAME_ROOM = `! nodehomematic:renameRoom
+string sRoomId = "##id##";
+string sName = "##name##";
+string sId;
+boolean bFound = false;
+foreach(sId, dom.GetObject(ID_ROOMS).EnumUsedIDs()) {
+    if (sId == sRoomId) {
+        bFound = true;
+    }
+}
+if (bFound) {
+    object oRoom = dom.GetObject(sRoomId);
+    oRoom.Name(sName);
+    Write("{\\"ok\\":true}");
+} else {
+    Write("{\\"ok\\":false}");
+}`;
+
+/**
+ * Delete a room: the WebUI's generic delete (eq-3/occu
+ * `WebUI/www/rega/esp/system.fn` `::DeleteObject`, refused for an
+ * `Unerasable()` object), only when `##id##` is a member of `ID_ROOMS`.
+ * Emits `{"ok":true}` or `{"ok":false,"reason":"room"|"unerasable"}`.
+ */
+export const DELETE_ROOM = `! nodehomematic:deleteRoom
+string sRoomId = "##id##";
+string sId;
+boolean bFound = false;
+foreach(sId, dom.GetObject(ID_ROOMS).EnumUsedIDs()) {
+    if (sId == sRoomId) {
+        bFound = true;
+    }
+}
+if (bFound) {
+    object oRoom = dom.GetObject(sRoomId);
+    if (oRoom.Unerasable()) {
+        Write("{\\"ok\\":false,\\"reason\\":\\"unerasable\\"}");
+    } else {
+        dom.DeleteObject(oRoom.ID());
+        Write("{\\"ok\\":true}");
+    }
+} else {
+    Write("{\\"ok\\":false,\\"reason\\":\\"room\\"}");
+}`;
+
+/**
+ * Add (`##op##` = `add`) or remove (`remove`) a channel, by address, to/from a
+ * room: Room.addChannel / Room.removeChannel (eq-3/occu
+ * `WebUI/www/api/methods/room/addchannel.tcl`, `removechannel.tcl`:
+ * `room.Add(channelId)` / `room.Remove(channelId)`). Emits `{"ok":true}` or
+ * `{"ok":false,"reason":"room"|"channel"}`.
+ */
+export const ROOM_CHANNEL = `! nodehomematic:roomChannel
+string sRoomId = "##id##";
+string sAddress = "##address##";
+string sOp = "##op##";
+string sId;
+string sChnId = "";
+boolean bFound = false;
+foreach(sId, dom.GetObject(ID_ROOMS).EnumUsedIDs()) {
+    if (sId == sRoomId) {
+        bFound = true;
+    }
+}
+foreach(sId, dom.GetObject(ID_CHANNELS).EnumUsedIDs()) {
+    object oTmp = dom.GetObject(sId);
+    if (oTmp) {
+        if (oTmp.Address() == sAddress) {
+            sChnId = sId;
+        }
+    }
+}
+if (!bFound) {
+    Write("{\\"ok\\":false,\\"reason\\":\\"room\\"}");
+} else {
+    if (sChnId == "") {
+        Write("{\\"ok\\":false,\\"reason\\":\\"channel\\"}");
+    } else {
+        object oRoom = dom.GetObject(sRoomId);
+        if (sOp == "add") {
+            oRoom.Add(sChnId);
+        } else {
+            oRoom.Remove(sChnId);
+        }
+        Write("{\\"ok\\":true}");
+    }
+}`;

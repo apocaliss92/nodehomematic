@@ -35,6 +35,7 @@ import type {
   ParameterData,
   XmlRpcValue,
 } from '../../../src/transport/xmlrpc/types.js';
+import { FakeRegaTopology } from './fake-rega-topology.js';
 
 /** A JSON-RPC error envelope field. */
 interface JsonRpcError {
@@ -78,6 +79,13 @@ export interface FakeDirectLink {
   readonly sender: string;
   readonly receiver: string;
   readonly name: string;
+  readonly description?: string;
+}
+
+/** One link-management call (`addLink` / `removeLink` / link `putParamset`). */
+export interface FakeLinkCall {
+  readonly method: 'addLink' | 'removeLink' | 'putParamset';
+  readonly params: readonly XmlRpcValue[];
 }
 
 /** Records of a callback (de)registration the fake CCU has seen. */
@@ -236,6 +244,8 @@ const XML_RPC_METHODS: readonly string[] = [
   'getLinks',
   'getMetadata',
   'reportValueUsage',
+  'addLink',
+  'removeLink',
   'getVersion',
   'system.listMethods',
 ];
@@ -264,6 +274,12 @@ export class FakeCcu {
   private readonly valueUsage = new Map<string, Record<string, number>>();
   /** Direct links returned by `getLinks`. */
   private readonly directLinks: FakeDirectLink[] = [];
+  /** Receiver link paramset values, keyed `${receiver}|${sender}`. */
+  private readonly linkValues = new Map<string, Record<string, XmlRpcValue>>();
+  /** `addLink` / `removeLink` / link `putParamset` calls, in order. */
+  private readonly linkCallLog: FakeLinkCall[] = [];
+  /** ReGa names and rooms answered for the `! nodehomematic:` scripts. */
+  public readonly rega: FakeRegaTopology;
   /** When set, `reportValueUsage` answers with this fault string. */
   private reportValueUsageFault: string | undefined;
   /** When true, `Device.listAllDetail` is a JSON-RPC error. */
@@ -285,6 +301,9 @@ export class FakeCcu {
     this.devices = [...CANNED_DEVICES, ...(options.extraDevices ?? [])];
     this.paramsets = { ...CANNED_PARAMSETS, ...(options.extraParamsets ?? {}) };
     this.failDeviceDetails = options.failDeviceDetails ?? false;
+    this.rega = new FakeRegaTopology(this.devices, cannedNames(), [
+      { id: '1234', name: 'Living Room', channels: ['VCU0000001:1'] },
+    ]);
     this.httpServer = createServer((req, res) => {
       this.handleRequest(req, res);
     });
@@ -382,9 +401,34 @@ export class FakeCcu {
     return [...this.valueUsageCalls];
   }
 
-  /** Remember a direct link so a later `getLinks` returns it. */
+  /**
+   * Remember a direct link so a later `getLinks` returns it. Its receiver link
+   * paramset starts at the DEFAULTs of `${receiver}|LINK` (empty when none).
+   */
   public addDirectLink(link: FakeDirectLink): void {
     this.directLinks.push({ ...link });
+    this.linkValues.set(`${link.receiver}|${link.sender}`, this.linkDefaults(link.receiver));
+  }
+
+  /** The receiver link paramset of one link, or `undefined` without that link. */
+  public linkParamset(receiver: string, sender: string): Record<string, XmlRpcValue> | undefined {
+    const values = this.linkValues.get(`${receiver}|${sender}`);
+    return values === undefined ? undefined : { ...values };
+  }
+
+  /** Overwrite some receiver link paramset values without a recorded call. */
+  public setLinkParamset(
+    receiver: string,
+    sender: string,
+    values: Record<string, XmlRpcValue>,
+  ): void {
+    const key = `${receiver}|${sender}`;
+    this.linkValues.set(key, { ...(this.linkValues.get(key) ?? {}), ...values });
+  }
+
+  /** `addLink` / `removeLink` / link `putParamset` calls seen so far, in order. */
+  public linkCalls(): readonly FakeLinkCall[] {
+    return [...this.linkCallLog];
   }
 
   /**
@@ -567,6 +611,10 @@ export class FakeCcu {
         return this.handleGetMetadata(params);
       case 'reportValueUsage':
         return this.handleReportValueUsage(params);
+      case 'addLink':
+        return this.handleAddLink(params);
+      case 'removeLink':
+        return this.handleRemoveLink(params);
       case 'getVersion':
         return '3.75.7';
       case 'system.listMethods':
@@ -621,6 +669,14 @@ export class FakeCcu {
   private handleGetParamset(params: readonly XmlRpcValue[]): XmlRpcValue {
     const channelAddress = asString(params[0], 'getParamset channelAddress');
     const paramsetKey = asString(params[1], 'getParamset paramsetKey');
+    if (paramsetKey.includes(':')) {
+      // A link paramset: getParamset(receiver, sender). The reverse order
+      // answers an empty struct, as a real HmIP-RF CCU does.
+      const link = this.linkValues.get(`${channelAddress}|${paramsetKey}`);
+      if (link !== undefined) return { ...link };
+      if (this.linkValues.has(`${paramsetKey}|${channelAddress}`)) return {};
+      throw new Error(`Unknown Paramset: ${paramsetKey}`);
+    }
     const description = this.paramsets[`${channelAddress}|${paramsetKey}`] ?? {};
     const result: Record<string, XmlRpcValue> = {};
     for (const [parameter, data] of Object.entries(description)) {
@@ -633,6 +689,15 @@ export class FakeCcu {
   private handlePutParamset(params: readonly XmlRpcValue[]): XmlRpcValue {
     const channelAddress = asString(params[0], 'putParamset channelAddress');
     const values = params[2];
+    const paramsetKey = asString(params[1], 'putParamset paramsetKey');
+    if (paramsetKey.includes(':')) {
+      const key = `${channelAddress}|${paramsetKey}`;
+      const current = this.linkValues.get(key);
+      if (current === undefined) throw new Error(`Unknown Paramset: ${paramsetKey}`);
+      this.linkCallLog.push({ method: 'putParamset', params: [...params] });
+      if (isXmlStruct(values)) this.linkValues.set(key, { ...current, ...values });
+      return '';
+    }
     if (values !== null && typeof values === 'object' && !Array.isArray(values)) {
       for (const [parameter, value] of Object.entries(values as Record<string, XmlRpcValue>)) {
         this.values.set(valueKey(channelAddress, parameter), value);
@@ -643,15 +708,59 @@ export class FakeCcu {
 
   private handleGetLinks(params: readonly XmlRpcValue[]): XmlRpcValue {
     const address = asString(params[0], 'getLinks address');
+    // A device address answers every link of its channels, as a real CCU does.
+    const matches = (channel: string): boolean =>
+      channel === address || channel.startsWith(`${address}:`);
     const links = this.directLinks.filter(
-      (link) => link.sender === address || link.receiver === address,
+      (link) => matches(link.sender) || matches(link.receiver),
     );
     return links.map((link) => ({
       SENDER: link.sender,
       RECEIVER: link.receiver,
       NAME: link.name,
+      DESCRIPTION: link.description ?? '',
       FLAGS: 0,
     }));
+  }
+
+  /** `addLink(sender, receiver, name, description)`; a duplicate faults. */
+  private handleAddLink(params: readonly XmlRpcValue[]): XmlRpcValue {
+    this.linkCallLog.push({ method: 'addLink', params: [...params] });
+    const sender = asString(params[0], 'addLink sender');
+    const receiver = asString(params[1], 'addLink receiver');
+    if (this.directLinks.some((l) => l.sender === sender && l.receiver === receiver)) {
+      throw new Error('link already exists');
+    }
+    this.addDirectLink({
+      sender,
+      receiver,
+      name: asString(params[2], 'addLink name'),
+      description: asString(params[3], 'addLink description'),
+    });
+    return '';
+  }
+
+  /** `removeLink(sender, receiver)`; an unknown link faults. */
+  private handleRemoveLink(params: readonly XmlRpcValue[]): XmlRpcValue {
+    this.linkCallLog.push({ method: 'removeLink', params: [...params] });
+    const sender = asString(params[0], 'removeLink sender');
+    const receiver = asString(params[1], 'removeLink receiver');
+    const index = this.directLinks.findIndex(
+      (l) => l.sender === sender && l.receiver === receiver,
+    );
+    if (index === -1) throw new Error('Unknown link');
+    this.directLinks.splice(index, 1);
+    this.linkValues.delete(`${receiver}|${sender}`);
+    return '';
+  }
+
+  /** DEFAULT of every parameter in `${receiver}|LINK`. */
+  private linkDefaults(receiver: string): Record<string, XmlRpcValue> {
+    const out: Record<string, XmlRpcValue> = {};
+    for (const [parameter, data] of Object.entries(this.paramsets[`${receiver}|LINK`] ?? {})) {
+      out[parameter] = data.DEFAULT ?? 0;
+    }
+    return out;
   }
 
   private handleGetMetadata(params: readonly XmlRpcValue[]): XmlRpcValue {
@@ -793,6 +902,8 @@ export class FakeCcu {
    */
   private handleRegaRunScript(params: Record<string, unknown>): unknown {
     const script = String(params['script'] ?? '');
+    const topology = this.rega.run(script);
+    if (topology !== undefined) return topology;
     if (script.includes('ID_SYSTEM_VARIABLES')) {
       return JSON.stringify(CANNED_SYSVAR_DESCRIPTIONS);
     }
@@ -824,6 +935,37 @@ export class FakeCcu {
     }
     return { result: null, error: { code: -32001, message: 'access denied' } };
   }
+}
+
+/** A plain object (not an array, a Date or bytes). */
+function isObject(value: unknown): value is Record<string, unknown> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    !(value instanceof Date) &&
+    !(value instanceof Uint8Array)
+  );
+}
+
+/** An XML-RPC struct. */
+function isXmlStruct(value: XmlRpcValue | undefined): value is { [key: string]: XmlRpcValue } {
+  return isObject(value);
+}
+
+/** Device and channel names of the canned `Device.listAllDetail`, by address. */
+function cannedNames(): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const device of CANNED_DEVICE_DETAIL) {
+    names.set(String(device['address']), String(device['name']));
+    const channels = device['channels'];
+    if (Array.isArray(channels)) {
+      for (const channel of channels) {
+        if (isObject(channel)) names.set(String(channel['address']), String(channel['name']));
+      }
+    }
+  }
+  return names;
 }
 
 /** Build the map key for a stored channel/parameter value. */

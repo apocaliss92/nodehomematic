@@ -56,6 +56,79 @@ export interface HmChannelLinkState {
   readonly links: readonly HmChannelLink[];
 }
 
+/**
+ * What one key press does on a switch actuator link. `none` is
+ * `PROFILE_ACTION_TYPE_INACTIVE` (the press is ignored).
+ */
+export type HmLinkPressAction = 'toggle' | 'on' | 'off' | 'none';
+
+/** The short and long press actions of a key → switch actuator link. */
+export interface HmSwitchLinkActions {
+  readonly short: HmLinkPressAction;
+  readonly long: HmLinkPressAction;
+}
+
+/** A link whose receiver paramset matches the switch catalogue exactly. */
+export interface HmSwitchLinkProfile extends HmSwitchLinkActions {
+  readonly kind: 'switch';
+}
+
+/**
+ * A key → switch link whose receiver paramset matches no catalogue profile
+ * (a timer, a delay, an expert setting). It is never rewritten by
+ * `setLinkProfile`.
+ */
+export interface HmCustomLinkProfile {
+  readonly kind: 'custom';
+}
+
+/** The resolved profile of a key → switch actuator link. */
+export type HmLinkProfile = HmSwitchLinkProfile | HmCustomLinkProfile;
+
+/** One direct link with its CCU name, description and resolved profile. */
+export interface HmLink {
+  readonly sender: string;
+  readonly receiver: string;
+  /** `NAME` from `getLinks`; `""` when the CCU sent none. */
+  readonly name: string;
+  /** `DESCRIPTION` from `getLinks` verbatim; `""` when the CCU sent none. */
+  readonly description: string;
+  /**
+   * The switch profile, or `null` when the link is not a `KEY_TRANSCEIVER` →
+   * `SWITCH_VIRTUAL_RECEIVER` link between two known channels (no catalogue
+   * applies).
+   */
+  readonly profile: HmLinkProfile | null;
+}
+
+/** A device or channel address with the name the CCU now holds for it. */
+export interface HmNamedObject {
+  readonly address: string;
+  readonly name: string;
+}
+
+/** Options of `renameDevice`. */
+export interface HmRenameDeviceOptions {
+  /** Also rename every channel to `<name>:<channelIndex>`. */
+  readonly renameChannels: boolean;
+}
+
+/** The names the CCU applied after `renameDevice` (it may adjust them to stay unique). */
+export interface HmDeviceRename {
+  readonly device: HmNamedObject;
+  /** Renamed channels; empty when `renameChannels` was `false`. */
+  readonly channels: readonly HmNamedObject[];
+}
+
+/** A CCU room with its member channels. */
+export interface HmRoom {
+  /** ReGa object id of the room. */
+  readonly id: string;
+  readonly name: string;
+  /** Member channel addresses (`DEVICE:index`). */
+  readonly channels: readonly string[];
+}
+
 /** A public snapshot of a single device. */
 export interface HmDevice {
   readonly address: string;

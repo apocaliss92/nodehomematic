@@ -368,7 +368,7 @@ export class CentralUnit {
     paramsetKey: ParamsetKey | string,
   ): Promise<Record<string, unknown>> {
     const client = this.clientFor(interfaceId);
-    return client.getParamset(channelAddress, paramsetKey as ParamsetKey);
+    return client.getParamset(channelAddress, paramsetKey);
   }
 
   /**
@@ -382,7 +382,7 @@ export class CentralUnit {
     values: Record<string, XmlRpcValue>,
   ): Promise<void> {
     const client = this.clientFor(interfaceId);
-    await client.putParamset(channelAddress, paramsetKey as ParamsetKey, values);
+    await client.putParamset(channelAddress, paramsetKey, values);
   }
 
   /**
@@ -423,6 +423,22 @@ export class CentralUnit {
     refCounter: number,
   ): Promise<boolean> {
     return this.clientFor(interfaceId).reportValueUsage(channelAddress, valueId, refCounter);
+  }
+
+  /** XML-RPC `addLink(sender, receiver, name, description)`, routed by interface id. */
+  public async addLink(
+    interfaceId: string,
+    sender: string,
+    receiver: string,
+    name: string,
+    description: string,
+  ): Promise<void> {
+    await this.clientFor(interfaceId).addLink(sender, receiver, name, description);
+  }
+
+  /** XML-RPC `removeLink(sender, receiver)`, routed by interface id. */
+  public async removeLink(interfaceId: string, sender: string, receiver: string): Promise<void> {
+    await this.clientFor(interfaceId).removeLink(sender, receiver);
   }
 
   /** Resolve the {@link InterfaceClient} bound to `interfaceId`, or throw. */

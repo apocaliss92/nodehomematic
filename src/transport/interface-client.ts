@@ -34,6 +34,12 @@ import { XmlRpcClient, type BasicAuth } from './xmlrpc/client.js';
 import type { DeviceDescription, ParameterData, ParamsetKey, XmlRpcValue } from './xmlrpc/types.js';
 
 /**
+ * A paramset key (`MASTER`, `VALUES`, …) or, for a link paramset, the peer
+ * channel address (`getParamset(receiver, sender)`).
+ */
+type ParamsetTarget = ParamsetKey | (string & {});
+
+/**
  * Minimal contract the {@link InterfaceClient} needs from an XML-RPC client.
  * {@link XmlRpcClient} implements it; tests can inject a fake.
  */
@@ -243,10 +249,13 @@ export class InterfaceClient {
     });
   }
 
-  /** `getParamset(channelAddress, paramsetKey)` → struct. */
+  /**
+   * `getParamset(channelAddress, paramsetKey)` → struct. For a link paramset
+   * the key is the peer address: `getParamset(receiver, sender)`.
+   */
   public async getParamset(
     channelAddress: string,
-    paramsetKey: ParamsetKey,
+    paramsetKey: ParamsetTarget,
   ): Promise<Record<string, unknown>> {
     const result = await this.callGuarded('getParamset', [channelAddress, paramsetKey]);
     return asStruct(result);
@@ -299,6 +308,29 @@ export class InterfaceClient {
     return result === true || result === 1;
   }
 
+  /**
+   * `addLink(sender, receiver, name, description)` — create a direct link.
+   * eq-3/occu `WebUI/www/api/methods/interface/addlink.tcl` forwards exactly
+   * these four strings. Not retried: a second attempt after a lost answer
+   * could race the first.
+   */
+  public async addLink(
+    sender: string,
+    receiver: string,
+    name: string,
+    description: string,
+  ): Promise<void> {
+    await this.callGuarded('addLink', [sender, receiver, name, description]);
+  }
+
+  /**
+   * `removeLink(sender, receiver)` — delete a direct link
+   * (eq-3/occu `WebUI/www/api/methods/interface/removelink.tcl`).
+   */
+  public async removeLink(sender: string, receiver: string): Promise<void> {
+    await this.callGuarded('removeLink', [sender, receiver]);
+  }
+
   /** `setValue(channelAddress, parameter, value[, rxMode])` — wrapped in retry. */
   public async setValue(
     channelAddress: string,
@@ -316,10 +348,13 @@ export class InterfaceClient {
     });
   }
 
-  /** `putParamset(channelAddress, paramsetKey, values[, rxMode])` — wrapped in retry. */
+  /**
+   * `putParamset(channelAddress, paramsetKey, values[, rxMode])` — wrapped in
+   * retry. For a link paramset the key is the peer address.
+   */
   public async putParamset(
     channelAddress: string,
-    paramsetKey: ParamsetKey,
+    paramsetKey: ParamsetTarget,
     values: Record<string, XmlRpcValue>,
     rxMode?: string,
   ): Promise<void> {

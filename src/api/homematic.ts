@@ -45,6 +45,14 @@ import {
   parseChannelLinks,
 } from './central-link.js';
 import {
+  classifyLinkParamset,
+  isSwitchLinkPair,
+  parseLinks,
+  switchLinkValues,
+  type ParsedLink,
+} from './link-profile.js';
+import type { CcuTopology } from '../central/management/ccu-topology.js';
+import {
   buildCustomEntities,
   CustomEntity,
   ClimateEntity,
@@ -64,6 +72,14 @@ import type {
   HmCcuInfo,
   HmChannel,
   HmChannelLinkState,
+  HmDeviceRename,
+  HmLink,
+  HmLinkPressAction,
+  HmLinkProfile,
+  HmNamedObject,
+  HmRenameDeviceOptions,
+  HmRoom,
+  HmSwitchLinkActions,
   HmConfigParam,
   HmCustomEntity,
   HmDataPoint,
@@ -183,6 +199,23 @@ function toInterface(name: string): Interface {
 }
 
 /** Device address owning a channel address (`DEV:idx` → `DEV`). */
+const CHANNEL_ADDRESS_PATTERN = /^[0-9A-Za-z_-]+:\d+$/;
+const PRESS_ACTIONS: ReadonlySet<string> = new Set<HmLinkPressAction>(['toggle', 'on', 'off', 'none']);
+
+/** Throw unless `address` is shaped like a channel address (`DEVICE:index`). */
+function requireChannelAddress(address: string): void {
+  if (!CHANNEL_ADDRESS_PATTERN.test(address)) {
+    throw new ValidationError(`Invalid channel address "${address}".`);
+  }
+}
+
+/** Throw unless `action` is a catalogue press action (callers may be untyped JS). */
+function requirePressAction(action: string): void {
+  if (!PRESS_ACTIONS.has(action)) {
+    throw new ValidationError(`Unknown press action "${action}".`);
+  }
+}
+
 function deviceAddressOf(channelAddress: string): string {
   const colon = channelAddress.lastIndexOf(':');
   return colon === -1 ? channelAddress : channelAddress.slice(0, colon);
@@ -254,6 +287,8 @@ export class Homematic {
   #roomsByDevice = new Map<string, string[]>();
   /** Device address → its aggregated function names (union of its channels'). */
   #functionsByDevice = new Map<string, string[]>();
+  /** Device/channel address → the name a rename on this facade made the CCU store. */
+  readonly #renamedNames = new Map<string, string>();
 
   /**
    * Build a facade that owns a real {@link CentralUnit} for `options`. (Tests
@@ -335,6 +370,7 @@ export class Homematic {
     this.#programs = [];
     this.#roomsByDevice.clear();
     this.#functionsByDevice.clear();
+    this.#renamedNames.clear();
   }
 
   // --- public read surface --------------------------------------------------
@@ -350,6 +386,7 @@ export class Homematic {
         device,
         this.#roomsByDevice.get(device.address),
         this.#functionsByDevice.get(device.address),
+        this.#renamedNames,
       ),
     );
   }
@@ -463,6 +500,189 @@ export class Homematic {
     if (!accepted) {
       throw new ClientError(`reportValueUsage refused for channel "${channelAddress}".`);
     }
+  }
+
+  // --- direct links + switch link profiles ------------------------------------
+
+  /**
+   * Create a direct link from `sender` to `receiver` (XML-RPC
+   * `addLink(sender, receiver, name, description)` on the sender's interface,
+   * as eq-3/occu `WebUI/www/api/methods/interface/addlink.tcl` forwards it).
+   * Idempotent: when `getLinks(sender)` already lists the pair this returns
+   * without a call and leaves the existing name and description unchanged.
+   * The sender must be a known channel; a fault is a {@link ClientError}.
+   */
+  public async addLink(
+    sender: string,
+    receiver: string,
+    name: string = '',
+    description: string = '',
+  ): Promise<void> {
+    const device = this.#requireKnownChannel(sender);
+    requireChannelAddress(receiver);
+    if ((await this.#findLink(device.interfaceId, sender, receiver)) !== undefined) return;
+    await this.#central.addLink(device.interfaceId, sender, receiver, name, description);
+  }
+
+  /**
+   * Remove the direct link from `sender` to `receiver` (XML-RPC
+   * `removeLink(sender, receiver)`, eq-3/occu `interface/removelink.tcl`).
+   * Idempotent: when `getLinks(sender)` does not list the pair this returns
+   * without a call — removing a link that does not exist is not an error.
+   */
+  public async removeLink(sender: string, receiver: string): Promise<void> {
+    const device = this.#requireKnownChannel(sender);
+    requireChannelAddress(receiver);
+    if ((await this.#findLink(device.interfaceId, sender, receiver)) === undefined) return;
+    await this.#central.removeLink(device.interfaceId, sender, receiver);
+  }
+
+  /**
+   * Every direct link of a device or channel (XML-RPC `getLinks(address, 0)`;
+   * a device address lists the links of all its channels) with `name`,
+   * `description` and the resolved switch `profile`. The profile is read with
+   * `getParamset(receiver, sender)` for each `KEY_TRANSCEIVER` →
+   * `SWITCH_VIRTUAL_RECEIVER` link between known channels and is `null` for any
+   * other link (see {@link Homematic.getLinkProfile}). A failed read is a
+   * {@link ClientError}.
+   */
+  public async listLinks(deviceOrChannelAddress: string): Promise<HmLink[]> {
+    const device = this.#requireKnownAddress(deviceOrChannelAddress);
+    const raw = await this.#central.getLinks(
+      device.interfaceId,
+      deviceOrChannelAddress,
+      GET_LINKS_FLAGS,
+    );
+    const links: HmLink[] = [];
+    for (const link of parseLinks(raw)) {
+      links.push({ ...link, profile: await this.#readLinkProfile(link) });
+    }
+    return links;
+  }
+
+  /**
+   * The switch profile of one existing link: short and long press each
+   * `toggle | on | off | none`, or `{ kind: 'custom' }` when the receiver
+   * paramset matches no catalogue entry exactly (catalogue and sources:
+   * `src/api/link-profile.ts`, from eq-3/occu
+   * `WebUI/www/config/easymodes/SWITCH_VIRTUAL_RECEIVER/KEY_TRANSCEIVER.tcl`).
+   * `null` when the link is not `KEY_TRANSCEIVER` → `SWITCH_VIRTUAL_RECEIVER`.
+   * An unknown link is a {@link ValidationError}.
+   */
+  public async getLinkProfile(sender: string, receiver: string): Promise<HmLinkProfile | null> {
+    const device = this.#requireKnownChannel(sender);
+    const link = await this.#findLink(device.interfaceId, sender, receiver);
+    if (link === undefined) {
+      throw new ValidationError(`No link from "${sender}" to "${receiver}".`);
+    }
+    return this.#readLinkProfile(link);
+  }
+
+  /**
+   * Write a catalogue profile to a key → switch link: ONE
+   * `putParamset(receiver, sender, values)` with exactly the parameters the
+   * two actions define (`none` writes only `PROFILE_ACTION_TYPE = 0`). Refused
+   * with a {@link ValidationError}, before any write, when the link does not
+   * exist, is not `KEY_TRANSCEIVER` → `SWITCH_VIRTUAL_RECEIVER`, or currently
+   * reads `custom` — a custom link is never rewritten.
+   */
+  public async setLinkProfile(
+    sender: string,
+    receiver: string,
+    actions: HmSwitchLinkActions,
+  ): Promise<void> {
+    requirePressAction(actions.short);
+    requirePressAction(actions.long);
+    const senderDevice = this.#requireKnownChannel(sender);
+    const receiverDevice = this.#requireKnownChannel(receiver);
+    const link = await this.#findLink(senderDevice.interfaceId, sender, receiver);
+    if (link === undefined) {
+      throw new ValidationError(`No link from "${sender}" to "${receiver}".`);
+    }
+    const current = await this.#readLinkProfile(link);
+    if (current === null) {
+      throw new ValidationError(
+        `The link "${sender}" → "${receiver}" is not a key → switch actuator link.`,
+      );
+    }
+    if (current.kind === 'custom') {
+      throw new ValidationError(
+        `The link "${sender}" → "${receiver}" has a custom profile; it is not rewritten.`,
+      );
+    }
+    await this.#central.writeParamset(
+      receiverDevice.interfaceId,
+      receiver,
+      sender,
+      switchLinkValues(actions),
+    );
+  }
+
+  // --- names and rooms (WebUI credentials) -------------------------------------
+
+  /**
+   * Rename a device and, with `renameChannels`, every channel of it to
+   * `<name>:<channelIndex>` (the CCU's own channel-name pattern). ReGa script
+   * over `ReGa.runScript` doing what JSON-RPC `Device.setName` /
+   * `Channel.setName` do (eq-3/occu `WebUI/www/api/methods/device/setname.tcl`).
+   * Resolves with the names the CCU stored (it keeps names unique); `devices()`
+   * shows them from then on. Needs WebUI credentials.
+   */
+  public async renameDevice(
+    address: string,
+    name: string,
+    options: HmRenameDeviceOptions,
+  ): Promise<HmDeviceRename> {
+    this.#requireKnownDevice(address);
+    const result = await this.#requireTopology().renameDevice(
+      address,
+      name,
+      options.renameChannels,
+    );
+    this.#rememberNames([result.device, ...result.channels]);
+    return result;
+  }
+
+  /** Rename one channel (as JSON-RPC `Channel.setName`); resolves with the stored name. Needs WebUI credentials. */
+  public async renameChannel(address: string, name: string): Promise<HmNamedObject> {
+    this.#requireKnownChannel(address);
+    const result = await this.#requireTopology().renameChannel(address, name);
+    this.#rememberNames([result]);
+    return result;
+  }
+
+  /**
+   * Every CCU room with its member channel addresses, read live (ReGa walk of
+   * `ID_ROOMS`, as JSON-RPC `Room.getAll`). `HmDevice.rooms` is the snapshot
+   * taken at `start()`. Needs WebUI credentials.
+   */
+  public async listRooms(): Promise<HmRoom[]> {
+    return this.#requireTopology().rooms();
+  }
+
+  /** Create an empty room (eq-3/occu `rega/esp/rooms.fn` `createRoomRetId`); a duplicate name is refused. Needs WebUI credentials. */
+  public async createRoom(name: string): Promise<HmRoom> {
+    return this.#requireTopology().createRoom(name);
+  }
+
+  /** Rename a room by its id (`rooms.fn` `changeRoomName`). Needs WebUI credentials. */
+  public async renameRoom(roomId: string, name: string): Promise<void> {
+    await this.#requireTopology().renameRoom(roomId, name);
+  }
+
+  /** Delete a room by its id (`rega/esp/system.fn` `DeleteObject`). Needs WebUI credentials. */
+  public async deleteRoom(roomId: string): Promise<void> {
+    await this.#requireTopology().deleteRoom(roomId);
+  }
+
+  /** Add a channel to a room (as JSON-RPC `Room.addChannel`, by address). Needs WebUI credentials. */
+  public async addChannelToRoom(roomId: string, channelAddress: string): Promise<void> {
+    await this.#requireTopology().addChannelToRoom(roomId, channelAddress);
+  }
+
+  /** Remove a channel from a room (as JSON-RPC `Room.removeChannel`, by address). Needs WebUI credentials. */
+  public async removeChannelFromRoom(roomId: string, channelAddress: string): Promise<void> {
+    await this.#requireTopology().removeChannelFromRoom(roomId, channelAddress);
   }
 
   // --- CCU management ---------------------------------------------------------
@@ -1159,6 +1379,64 @@ export class Homematic {
     return this.#hub;
   }
 
+  /** Throw unless `start()` has run and `address` is a known device. */
+  #requireKnownDevice(address: string): ModelDevice {
+    if (!this.#started) {
+      throw new ValidationError('Homematic is not started; call start() first.');
+    }
+    const device = this.#devicesByAddress.get(address);
+    if (device === undefined) throw new ValidationError(`Unknown device "${address}".`);
+    return device;
+  }
+
+  /** A known device address, or a known channel address (its device). */
+  #requireKnownAddress(address: string): ModelDevice {
+    return address.includes(':')
+      ? this.#requireKnownChannel(address)
+      : this.#requireKnownDevice(address);
+  }
+
+  /** Channel type from the model; `undefined` for an unknown channel. */
+  #channelType(channelAddress: string): string | undefined {
+    return this.#devicesByAddress.get(deviceAddressOf(channelAddress))?.channel(channelAddress)
+      ?.type;
+  }
+
+  /** The `getLinks(sender, 0)` row for one pair, if the CCU lists it. */
+  async #findLink(
+    interfaceId: string,
+    sender: string,
+    receiver: string,
+  ): Promise<ParsedLink | undefined> {
+    const raw = await this.#central.getLinks(interfaceId, sender, GET_LINKS_FLAGS);
+    return parseLinks(raw).find((link) => link.sender === sender && link.receiver === receiver);
+  }
+
+  /** `null` outside the catalogue's pair; else the receiver paramset, classified. */
+  async #readLinkProfile(link: ParsedLink): Promise<HmLinkProfile | null> {
+    if (!isSwitchLinkPair(this.#channelType(link.sender), this.#channelType(link.receiver))) {
+      return null;
+    }
+    const receiverDevice = this.#devicesByAddress.get(deviceAddressOf(link.receiver));
+    if (receiverDevice === undefined) return null;
+    const paramset = await this.#central.readParamset(
+      receiverDevice.interfaceId,
+      link.receiver,
+      link.sender,
+    );
+    return classifyLinkParamset(paramset);
+  }
+
+  /** The names/rooms service (needs `start()`; a script without credentials throws). */
+  #requireTopology(): CcuTopology {
+    return this.#requireManagement().topology();
+  }
+
+  /** Keep the names a rename made the CCU store, for `devices()`. */
+  #rememberNames(named: readonly HmNamedObject[]): void {
+    for (const entry of named) this.#renamedNames.set(entry.address, entry.name);
+  }
+
   /** Throw unless `start()` has run and `channelAddress` is a known channel. */
   #requireKnownChannel(channelAddress: string): ModelDevice {
     if (!this.#started) {
@@ -1308,12 +1586,13 @@ function toHmDevice(
   device: ModelDevice,
   hubRooms?: readonly string[],
   hubFunctions?: readonly string[],
+  renamed?: ReadonlyMap<string, string>,
 ): HmDevice {
   const channels: HmChannel[] = device.channels.map((channel) => ({
     address: channel.address,
     index: channel.index,
     ...(channel.type !== undefined ? { type: channel.type } : {}),
-    name: channel.name ?? null,
+    name: renamed?.get(channel.address) ?? channel.name ?? null,
     dataPoints: channel.dataPoints.map(toHmDataPoint),
   }));
   const rooms = unionStrings(device.rooms, hubRooms);
@@ -1321,7 +1600,7 @@ function toHmDevice(
   return {
     address: device.address,
     type: device.type,
-    name: device.name ?? null,
+    name: renamed?.get(device.address) ?? device.name ?? null,
     ...(rooms !== undefined ? { rooms } : {}),
     ...(functions !== undefined ? { functions } : {}),
     ...(device.firmware !== undefined ? { firmware: device.firmware } : {}),

@@ -33,6 +33,7 @@ import { jsEscape, type WebUiHttp } from '../../transport/webui/webui-http.js';
 import { JsonRpcMethod } from '../../transport/jsonrpc/methods.js';
 import type { InstallModeCall, RadioGatewayInfo } from '../../transport/interface-client.js';
 import { decodeRegaName, runScript, type RegaPostClient } from '../rega/rega-runner.js';
+import { CcuTopology } from './ccu-topology.js';
 import {
   ACKNOWLEDGE_SERVICE_MESSAGE,
   GET_CCU_PLATFORM,
@@ -506,6 +507,13 @@ export class CcuManagement {
       );
     }
     return found;
+  }
+
+  // --- names and rooms ---------------------------------------------------------
+
+  /** Device/channel names and rooms over ReGa, on this service's session. */
+  public topology(): CcuTopology {
+    return new CcuTopology((label, script, params) => this.rega(label, script, params));
   }
 
   // --- internals ---------------------------------------------------------------
