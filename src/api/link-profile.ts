@@ -41,11 +41,7 @@
  */
 
 import type { XmlRpcValue } from '../transport/xmlrpc/types.js';
-import type {
-  HmLinkPressAction,
-  HmLinkProfile,
-  HmSwitchLinkActions,
-} from './types.js';
+import type { HmLinkPressAction, HmLinkProfile, HmSwitchLinkActions } from './types.js';
 
 /** `getLinks` row narrowed to what the facade exposes, before profile resolution. */
 export interface ParsedLink {
@@ -123,7 +119,10 @@ const JUMP_TABLES: Readonly<Record<ActiveAction, Readonly<Record<PressPrefix, Ha
 /** Checked in this order; the exact values make them disjoint. */
 const ACTIVE_ACTIONS: readonly ActiveAction[] = ['toggle', 'on', 'off'];
 
-function halfValues(prefix: PressPrefix, action: HmLinkPressAction): Record<string, LinkParamValue> {
+function halfValues(
+  prefix: PressPrefix,
+  action: HmLinkPressAction,
+): Record<string, LinkParamValue> {
   if (action === 'none') return { [`${prefix}_${ACTION_TYPE}`]: ACTION_TYPE_INACTIVE };
   const out: Record<string, LinkParamValue> = {};
   for (const [param, value] of Object.entries({ ...COMMON, ...JUMP_TABLES[action][prefix] })) {

@@ -150,10 +150,7 @@ export class CcuTopology {
   public async renameRoom(id: string, rawName: string): Promise<void> {
     const name = validName(rawName, 'Room');
     const label = 'ReGa.runScript(renameRoom)';
-    const answer = okOf(
-      await this.#rega(label, RENAME_ROOM, { id: validRoomId(id), name }),
-      label,
-    );
+    const answer = okOf(await this.#rega(label, RENAME_ROOM, { id: validRoomId(id), name }), label);
     if (answer['ok'] !== true) throw new ValidationError(`Unknown room "${id}".`);
   }
 

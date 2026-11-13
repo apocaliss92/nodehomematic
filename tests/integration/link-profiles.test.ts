@@ -197,9 +197,7 @@ describe('direct links and switch link profiles (fake CCU)', () => {
     await expect(hm.listLinks('NOPE000001')).rejects.toBeInstanceOf(ValidationError);
     // A caller without the types (plain JavaScript, a JSON request) can send anything.
     const untyped: HmSwitchLinkActions = JSON.parse('{"short":"on","long":"dim"}');
-    await expect(hm.setLinkProfile(KEY_1, SWITCH, untyped)).rejects.toBeInstanceOf(
-      ValidationError,
-    );
+    await expect(hm.setLinkProfile(KEY_1, SWITCH, untyped)).rejects.toBeInstanceOf(ValidationError);
     expect(fakeCcu.linkCalls()).toEqual([]);
   });
 });

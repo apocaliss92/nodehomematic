@@ -711,9 +711,7 @@ export class FakeCcu {
     // A device address answers every link of its channels, as a real CCU does.
     const matches = (channel: string): boolean =>
       channel === address || channel.startsWith(`${address}:`);
-    const links = this.directLinks.filter(
-      (link) => matches(link.sender) || matches(link.receiver),
-    );
+    const links = this.directLinks.filter((link) => matches(link.sender) || matches(link.receiver));
     return links.map((link) => ({
       SENDER: link.sender,
       RECEIVER: link.receiver,
@@ -745,9 +743,7 @@ export class FakeCcu {
     this.linkCallLog.push({ method: 'removeLink', params: [...params] });
     const sender = asString(params[0], 'removeLink sender');
     const receiver = asString(params[1], 'removeLink receiver');
-    const index = this.directLinks.findIndex(
-      (l) => l.sender === sender && l.receiver === receiver,
-    );
+    const index = this.directLinks.findIndex((l) => l.sender === sender && l.receiver === receiver);
     if (index === -1) throw new Error('Unknown link');
     this.directLinks.splice(index, 1);
     this.linkValues.delete(`${receiver}|${sender}`);

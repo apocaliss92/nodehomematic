@@ -200,7 +200,12 @@ function toInterface(name: string): Interface {
 
 /** Device address owning a channel address (`DEV:idx` → `DEV`). */
 const CHANNEL_ADDRESS_PATTERN = /^[0-9A-Za-z_-]+:\d+$/;
-const PRESS_ACTIONS: ReadonlySet<string> = new Set<HmLinkPressAction>(['toggle', 'on', 'off', 'none']);
+const PRESS_ACTIONS: ReadonlySet<string> = new Set<HmLinkPressAction>([
+  'toggle',
+  'on',
+  'off',
+  'none',
+]);
 
 /** Throw unless `address` is shaped like a channel address (`DEVICE:index`). */
 function requireChannelAddress(address: string): void {

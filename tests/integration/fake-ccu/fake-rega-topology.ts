@@ -21,7 +21,9 @@ function uriEncode(text: string): string {
   let out = '';
   for (const ch of text) {
     const code = ch.charCodeAt(0);
-    out += /[A-Za-z0-9]/.test(ch) ? ch : `%${(code & 0xff).toString(16).toUpperCase().padStart(2, '0')}`;
+    out += /[A-Za-z0-9]/.test(ch)
+      ? ch
+      : `%${(code & 0xff).toString(16).toUpperCase().padStart(2, '0')}`;
   }
   return out;
 }

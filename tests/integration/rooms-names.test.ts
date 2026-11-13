@@ -67,9 +67,9 @@ describe('renames and rooms (fake CCU)', () => {
     });
 
     it('validates before any script runs', async () => {
-      await expect(hm.renameDevice('NOPE000001', 'x', { renameChannels: false })).rejects.toBeInstanceOf(
-        ValidationError,
-      );
+      await expect(
+        hm.renameDevice('NOPE000001', 'x', { renameChannels: false }),
+      ).rejects.toBeInstanceOf(ValidationError);
       await expect(hm.renameChannel(CONTACT, '   ')).rejects.toBeInstanceOf(ValidationError);
       await expect(hm.renameChannel(CONTACT, 'line\nbreak')).rejects.toBeInstanceOf(
         ValidationError,
@@ -142,9 +142,9 @@ describe('renames and rooms without WebUI credentials', () => {
     await hm.start();
     try {
       await expect(hm.listRooms()).rejects.toBeInstanceOf(ValidationError);
-      await expect(
-        hm.renameDevice(DEVICE, 'x', { renameChannels: false }),
-      ).rejects.toBeInstanceOf(ValidationError);
+      await expect(hm.renameDevice(DEVICE, 'x', { renameChannels: false })).rejects.toBeInstanceOf(
+        ValidationError,
+      );
       expect(fakeCcu.rega.ops).toEqual([]);
     } finally {
       await hm.stop();
