@@ -12,24 +12,21 @@
  *   `RENAME_DEVICE` in `scripts.ts`). `ID()`, `Name()`.
  * - Channel flags: `Visible()` (`www/rega/esp/channels.fn` `setVisible`),
  *   `ReadyConfig()` (`channels.fn` `setReadyConfig`: `chn.ReadyConfig()`),
- *   `Enabled()` (the getter counterpart of the `Enabled(true)` setter in
- *   `bin/hm_autoconf`; no occu script reads it on a channel, so a CCU that has
- *   no such property answers nothing and the field is `null`),
+ *   (`Enabled()` is NOT read: occu only ever sets it, and one unknown method
+ *   aborts the whole ReGa script; the field is always `null`),
  *   `LastDPActionTimeSeconds()` (`www/rega/esp/system.fn`, the "last action"
  *   dialog: `obj.LastDPActionTime()` / `LastDPActionTimeSeconds()` for an
  *   `OT_CHANNEL`).
  * - Data point by name `<interface>.<address>.<PARAM>`: `dom.GetObject(name)`;
  *   `Value()`; `Timestamp()` / `TimestampSeconds()` (`system.fn`, same dialog
  *   for an `OT_DP`: the time of the last update, even when the value did not
- *   change); `LastTimestamp()` (`bin/hm_autoconf`, rain counter: the update
- *   before the current one, tested for truth), converted with `ToInteger()`
- *   (`generic_input_transmitter.fn` converts a `Value()` that way; no occu
- *   script converts a time that way, so that one field is unverified).
+ *   change). `LastTimestamp()` is NOT read: occu only tests it for truth and
+ *   no source converts it to a time; `lastTimestamp` is always `null`.
  * - Programs: `EnumUsedIDs()` of `ID_PROGRAMS`, `Active()` (`system.fn`
- *   `objProg.Active()`), `Internal()` (`channels.fn` reads it on channels;
- *   `hm_autoconf` writes it on programs), `ProgramLastExecuteTime()` /
+ *   `objProg.Active()`), `ProgramLastExecuteTime()` /
  *   `ProgramLastExecuteTimeSeconds()` (`system.fn`, the "last action" dialog
- *   for an `OT_PROGRAM`).
+ *   for an `OT_PROGRAM`). `Internal()` is NOT read on a program (occu never
+ *   reads it there); `internal` is always `null`.
  * - Conditions: `Rule()`, `RuleConditions().Count()`, `RuleCondition(i)`,
  *   `CndSingleCount()`, `CndSingleCondition(i)`, `LeftVal()` (`programs.fn`
  *   and the read script in `key-event-program.ts`). Only single conditions of
@@ -86,7 +83,7 @@ Write(sDpSep);
 sDpSep = ",";
 Write("{\\"name\\":\\"${name}\\"");
 if (oDp) {
-    Write(",\\"exists\\":true,\\"id\\":\\"" # oDp.ID() # "\\",\\"value\\":\\"" # ("" # oDp.Value()).UriEncode() # "\\",\\"timestampSeconds\\":\\"" # oDp.TimestampSeconds() # "\\",\\"lastTimestampSeconds\\":\\"" # oDp.LastTimestamp().ToInteger() # "\\"}");
+    Write(",\\"exists\\":true,\\"id\\":\\"" # oDp.ID() # "\\",\\"value\\":\\"" # ("" # oDp.Value()).UriEncode() # "\\",\\"timestampSeconds\\":\\"" # oDp.TimestampSeconds() # "\\",\\"lastTimestampSeconds\\":\\"" # "" # "\\"}");
 } else {
     Write(",\\"exists\\":false}");
 }`;
@@ -98,7 +95,7 @@ if (sChId${i} == "") {
     Write("\\"found\\":false,");
 } else {
     object oChn${i} = dom.GetObject(sChId${i});
-    Write("\\"found\\":true,\\"id\\":\\"" # oChn${i}.ID() # "\\",\\"name\\":\\"" # oChn${i}.Name().UriEncode() # "\\",\\"visible\\":\\"" # oChn${i}.Visible() # "\\",\\"enabled\\":\\"" # oChn${i}.Enabled() # "\\",\\"readyConfig\\":\\"" # oChn${i}.ReadyConfig() # "\\",\\"lastActionSeconds\\":\\"" # oChn${i}.LastDPActionTimeSeconds() # "\\",");
+    Write("\\"found\\":true,\\"id\\":\\"" # oChn${i}.ID() # "\\",\\"name\\":\\"" # oChn${i}.Name().UriEncode() # "\\",\\"visible\\":\\"" # oChn${i}.Visible() # "\\",\\"enabled\\":\\"" # "" # "\\",\\"readyConfig\\":\\"" # oChn${i}.ReadyConfig() # "\\",\\"lastActionSeconds\\":\\"" # oChn${i}.LastDPActionTimeSeconds() # "\\",");
 }
 Write("\\"datapoints\\":[");
 sDpSep = "";
@@ -189,7 +186,7 @@ foreach(sPrgId, dom.GetObject(ID_PROGRAMS).EnumUsedIDs()) {
         if (sRefs != "") {
             Write(sPSep);
             sPSep = ",";
-            Write("{\\"id\\":\\"" # oPrg.ID() # "\\",\\"name\\":\\"" # oPrg.Name().UriEncode() # "\\",\\"active\\":\\"" # oPrg.Active() # "\\",\\"internal\\":\\"" # oPrg.Internal() # "\\",\\"lastExecuteSeconds\\":\\"" # oPrg.ProgramLastExecuteTimeSeconds() # "\\",\\"datapoints\\":[" # sRefs # "]}");
+            Write("{\\"id\\":\\"" # oPrg.ID() # "\\",\\"name\\":\\"" # oPrg.Name().UriEncode() # "\\",\\"active\\":\\"" # oPrg.Active() # "\\",\\"internal\\":\\"" # "" # "\\",\\"lastExecuteSeconds\\":\\"" # oPrg.ProgramLastExecuteTimeSeconds() # "\\",\\"datapoints\\":[" # sRefs # "]}");
         }
     }
 }
