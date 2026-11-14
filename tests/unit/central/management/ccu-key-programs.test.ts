@@ -7,6 +7,7 @@ import { runScript, type RegaPostClient } from '../../../../src/central/rega/reg
 import {
   GET_KEY_EVENT_PROGRAM,
   REMOVE_KEY_EVENT_PROGRAM,
+  buildDeleteProgram,
   buildEnsureKeyEventProgram,
 } from '../../../../src/central/rega/key-event-program.js';
 import { ClientError, ValidationError } from '../../../../src/support/errors.js';
@@ -92,6 +93,49 @@ describe('key event program scripts', () => {
     );
     expect(() => buildEnsureKeyEventProgram([])).toThrow(ValidationError);
   });
+
+  it('deleteProgram deletes only an id listed in ID_PROGRAMS', () => {
+    const script = buildDeleteProgram('10655');
+    expect(script).toContain('! nodehomematic:deleteProgram');
+    expect(script).toContain('ID_PROGRAMS');
+    expect(script).toContain('10655');
+    const listed = script.indexOf('EnumUsedIDs()');
+    const deleted = script.indexOf('dom.DeleteObject');
+    const removed = script.indexOf('{\\"removed\\":true}');
+    const kept = script.indexOf('{\\"removed\\":false}');
+    expect(listed).toBeGreaterThanOrEqual(0);
+    expect(listed).toBeLessThan(deleted);
+    expect(deleted).toBeLessThan(removed);
+    expect(removed).toBeLessThan(kept);
+  });
+
+  it('rejects a program id that is not digits before it reaches the script', () => {
+    expect(() => buildDeleteProgram('10655; dom.DeleteObject(1)')).toThrow(ValidationError);
+    expect(() => buildDeleteProgram('')).toThrow(ValidationError);
+    expect(() => buildDeleteProgram('12a')).toThrow(ValidationError);
+    expect(() => buildDeleteProgram(' 10655')).toThrow(ValidationError);
+  });
+
+  it('refuses a duplicate name before creating, deleting or reading', () => {
+    const scripts = [
+      buildEnsureKeyEventProgram(DPS),
+      REMOVE_KEY_EVENT_PROGRAM,
+      GET_KEY_EVENT_PROGRAM,
+    ];
+    for (const script of scripts) {
+      expect(script).toContain('iMatches');
+      const guard = script.indexOf('\\"error\\":\\"duplicate\\"');
+      expect(guard).toBeGreaterThanOrEqual(0);
+      expect(script).toContain('\\"ids\\"');
+      const mutation = Math.min(
+        ...['CreateObject', 'DeleteObject', '"found"'].map((token) => {
+          const at = script.indexOf(token);
+          return at === -1 ? Number.POSITIVE_INFINITY : at;
+        }),
+      );
+      expect(guard).toBeLessThan(mutation);
+    }
+  });
 });
 
 describe('CcuKeyPrograms', () => {
@@ -143,10 +187,44 @@ describe('CcuKeyPrograms', () => {
     ).rejects.toThrow(ValidationError);
   });
 
+  it('delete removes a program by id and refuses a non-digit id before ReGa', async () => {
+    const deleted = service({ removed: true });
+    expect(await deleted.keyPrograms.delete('10655')).toEqual({ removed: true });
+    expect(deleted.calls[0]?.label).toBe('ReGa.runScript(deleteProgram)');
+    expect(deleted.calls[0]?.script).toContain('10655');
+    expect(deleted.calls[0]?.script).toContain('dom.DeleteObject');
+    expect(await service({ removed: false }).keyPrograms.delete('9')).toEqual({ removed: false });
+    await expect(service({}).keyPrograms.delete('1')).rejects.toThrow(ClientError);
+    const refused = service({ removed: true });
+    await expect(refused.keyPrograms.delete('1; x')).rejects.toThrow(ValidationError);
+    expect(refused.calls).toEqual([]);
+  });
+
   it('remove reports whether a program was deleted', async () => {
     expect(await service({ removed: true }).keyPrograms.remove('P')).toEqual({ removed: true });
     expect(await service({ removed: false }).keyPrograms.remove('P')).toEqual({ removed: false });
     await expect(service({}).keyPrograms.remove('P')).rejects.toThrow(ClientError);
+  });
+
+  it('ensure, remove and get name a duplicate and point at deleteProgram', async () => {
+    const answer = { error: 'duplicate', ids: ['10655', '10668'] };
+    const name = 'CamStack: Pulsante bagno camerette events';
+    const runs = [
+      (): Promise<unknown> =>
+        service(answer).keyPrograms.ensure('HmIP-RF', {
+          name,
+          channelAddresses: ['DEV:1'],
+        }),
+      (): Promise<unknown> => service(answer).keyPrograms.remove(name),
+      (): Promise<unknown> => service(answer).keyPrograms.get(name),
+    ];
+    for (const run of runs) {
+      await expect(run()).rejects.toThrow(ValidationError);
+      await expect(run()).rejects.toThrow(/CamStack: Pulsante bagno camerette events/);
+      await expect(run()).rejects.toThrow(/10655/);
+      await expect(run()).rejects.toThrow(/10668/);
+      await expect(run()).rejects.toThrow(/deleteProgram\(id\)/);
+    }
   });
 
   it('get returns the distinct channels, or null when absent', async () => {

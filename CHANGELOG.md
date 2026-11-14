@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `deleteProgram(programId)` deletes one CCU program by its ReGa id (digits only). A missing id, or an id that is not a program, returns `{ removed: false }` and deletes nothing. Needs WebUI credentials. The script deletes only an id listed by `ID_PROGRAMS.EnumUsedIDs()`, then `dom.DeleteObject` (`programs.fn` `DeleteProgram`).
+
+### Fixed
+
+- `ensureKeyEventProgram`, `getKeyEventProgram` and `removeKeyEventProgram` no longer follow the last program when several share a name. They throw `ValidationError` naming the program and its ids; `deleteProgram(id)` removes one of them.
+
 ## 0.8.1
 
 ### Fixed

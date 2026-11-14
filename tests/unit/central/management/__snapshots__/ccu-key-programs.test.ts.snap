@@ -6,14 +6,23 @@ string sName = "CamStack: Hall events";
 object oPrograms = dom.GetObject(ID_PROGRAMS);
 object oProg;
 string sPid;
+string sIds = "";
+string sIdSep = "";
+integer iMatches = 0;
 foreach(sPid, oPrograms.EnumUsedIDs()) {
     object oCand = dom.GetObject(sPid);
     if (oCand) {
         if (oCand.Name() == sName) {
             oProg = oCand;
+            sIds = sIds # sIdSep # "\\"" # sPid # "\\"";
+            sIdSep = ",";
+            iMatches = iMatches + 1;
         }
     }
 }
+if (iMatches > 1) {
+    Write("{\\"error\\":\\"duplicate\\",\\"ids\\":[" # sIds # "]}");
+} else {
 string sMissing = "";
 string sMissSep = "";
 object oDp0 = dom.GetObject("HmIP-RF.00315F298E5093:1.PRESS_SHORT");
@@ -85,6 +94,7 @@ oSc.ConditionChannel(oDp2.Channel());
         Write("false");
     }
     Write("}");
+}
 }"
 `;
 
@@ -94,19 +104,29 @@ string sName = "P";
 object oPrograms = dom.GetObject(ID_PROGRAMS);
 object oProg;
 string sPid;
+string sIds = "";
+string sIdSep = "";
+integer iMatches = 0;
 foreach(sPid, oPrograms.EnumUsedIDs()) {
     object oCand = dom.GetObject(sPid);
     if (oCand) {
         if (oCand.Name() == sName) {
             oProg = oCand;
+            sIds = sIds # sIdSep # "\\"" # sPid # "\\"";
+            sIdSep = ",";
+            iMatches = iMatches + 1;
         }
     }
 }
-if (oProg) {
-    dom.DeleteObject(oProg.ID());
-    Write("{\\"removed\\":true}");
+if (iMatches > 1) {
+    Write("{\\"error\\":\\"duplicate\\",\\"ids\\":[" # sIds # "]}");
 } else {
-    Write("{\\"removed\\":false}");
+    if (oProg) {
+        dom.DeleteObject(oProg.ID());
+        Write("{\\"removed\\":true}");
+    } else {
+        Write("{\\"removed\\":false}");
+    }
 }"
 `;
 
@@ -116,14 +136,23 @@ string sName = "P";
 object oPrograms = dom.GetObject(ID_PROGRAMS);
 object oProg;
 string sPid;
+string sIds = "";
+string sIdSep = "";
+integer iMatches = 0;
 foreach(sPid, oPrograms.EnumUsedIDs()) {
     object oCand = dom.GetObject(sPid);
     if (oCand) {
         if (oCand.Name() == sName) {
             oProg = oCand;
+            sIds = sIds # sIdSep # "\\"" # sPid # "\\"";
+            sIdSep = ",";
+            iMatches = iMatches + 1;
         }
     }
 }
+if (iMatches > 1) {
+    Write("{\\"error\\":\\"duplicate\\",\\"ids\\":[" # sIds # "]}");
+} else {
 if (!oProg) {
     Write("{\\"found\\":false}");
 } else {
@@ -149,5 +178,6 @@ if (!oProg) {
         }
     }
     Write("]}");
+}
 }"
 `;

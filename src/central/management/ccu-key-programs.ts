@@ -9,6 +9,7 @@ import { ClientError, ValidationError } from '../../support/errors.js';
 import {
   GET_KEY_EVENT_PROGRAM,
   REMOVE_KEY_EVENT_PROGRAM,
+  buildDeleteProgram,
   buildEnsureKeyEventProgram,
 } from '../rega/key-event-program.js';
 import type {
@@ -31,6 +32,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function record(raw: unknown, label: string): Record<string, unknown> {
   if (!isRecord(raw)) throw new ClientError(`${label}: unexpected answer from the CCU.`);
   return raw;
+}
+
+function throwIfDuplicate(answer: Record<string, unknown>, name: string): void {
+  if (answer['error'] !== 'duplicate') return;
+  const raw = answer['ids'];
+  const ids = Array.isArray(raw)
+    ? raw.filter((id): id is string => typeof id === 'string' && id !== '')
+    : [];
+  const listed = ids.length > 0 ? ids.join(', ') : '?';
+  throw new ValidationError(
+    `More than one program is named "${name}" (ids ${listed}). deleteProgram(id) deletes one of them.`,
+  );
 }
 
 function validName(raw: string): string {
@@ -84,6 +97,7 @@ export class CcuKeyPrograms {
       await this.#rega(label, buildEnsureKeyEventProgram(datapoints), { name }),
       label,
     );
+    throwIfDuplicate(answer, name);
     if (answer['error'] === 'datapoint') {
       const missing = Array.isArray(answer['missing']) ? answer['missing'].join(', ') : '?';
       throw new ValidationError(`The CCU has no such key data point: ${missing}.`);
@@ -96,11 +110,26 @@ export class CcuKeyPrograms {
     return { programId, created };
   }
 
+  /**
+   * Delete the program `programId` (digits only). `removed: false` when the id
+   * is missing or is not a program; nothing is deleted in that case.
+   */
+  public async delete(programId: string): Promise<{ removed: boolean }> {
+    const script = buildDeleteProgram(programId);
+    const label = 'ReGa.runScript(deleteProgram)';
+    const answer = record(await this.#rega(label, script), label);
+    if (typeof answer['removed'] !== 'boolean') {
+      throw new ClientError(`${label}: unexpected answer from the CCU.`);
+    }
+    return { removed: answer['removed'] };
+  }
+
   /** Delete the program by name; `removed: false` when it does not exist. */
   public async remove(rawName: string): Promise<{ removed: boolean }> {
     const name = validName(rawName);
     const label = 'ReGa.runScript(removeKeyEventProgram)';
     const answer = record(await this.#rega(label, REMOVE_KEY_EVENT_PROGRAM, { name }), label);
+    throwIfDuplicate(answer, name);
     if (typeof answer['removed'] !== 'boolean') {
       throw new ClientError(`${label}: unexpected answer from the CCU.`);
     }
@@ -112,6 +141,7 @@ export class CcuKeyPrograms {
     const name = validName(rawName);
     const label = 'ReGa.runScript(getKeyEventProgram)';
     const answer = record(await this.#rega(label, GET_KEY_EVENT_PROGRAM, { name }), label);
+    throwIfDuplicate(answer, name);
     if (answer['found'] !== true) return null;
     const programId = answer['programId'];
     if (typeof programId !== 'string' || programId === '') {

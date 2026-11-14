@@ -523,7 +523,9 @@ export class Homematic {
    * CCU subscribes to the key data points (ReGa scripts and their eq-3/occu
    * sources: `central/rega/key-event-program.ts`). All channels must be on one
    * interface and the CCU must have their data points; a missing one is a
-   * {@link ValidationError} naming it. Needs WebUI credentials.
+   * {@link ValidationError} naming it. Two programs with the same name are a
+   * {@link ValidationError} listing their ids (`deleteProgram(id)` removes one).
+   * Needs WebUI credentials.
    */
   public async ensureKeyEventProgram(
     input: HmKeyEventProgramInput,
@@ -543,12 +545,21 @@ export class Homematic {
     return this.#requireManagement().keyPrograms().ensure(iface, input);
   }
 
-  /** Delete the key event program `name`; `removed: false` when it does not exist. Needs WebUI credentials. */
+  /** Delete the key event program `name`; `removed: false` when it does not exist. A duplicate name is a {@link ValidationError}. Needs WebUI credentials. */
   public async removeKeyEventProgram(name: string): Promise<{ removed: boolean }> {
     return this.#requireManagement().keyPrograms().remove(name);
   }
 
-  /** The key event program `name` and the channels it listens to, or `null`. Needs WebUI credentials. */
+  /**
+   * Delete one CCU program by its ReGa id (digits only). `removed: false` when
+   * the id is missing or is not a program — nothing is deleted then. This is
+   * the way out of two programs that share a name. Needs WebUI credentials.
+   */
+  public async deleteProgram(programId: string): Promise<{ removed: boolean }> {
+    return this.#requireManagement().keyPrograms().delete(programId);
+  }
+
+  /** The key event program `name` and the channels it listens to, or `null`. A duplicate name is a {@link ValidationError}. Needs WebUI credentials. */
   public async getKeyEventProgram(name: string): Promise<HmKeyEventProgram | null> {
     return this.#requireManagement().keyPrograms().get(name);
   }

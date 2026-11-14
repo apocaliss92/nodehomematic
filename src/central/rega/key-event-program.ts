@@ -28,7 +28,14 @@
  * The scripts are built, not constants, because the data point list varies;
  * every data point name is validated against {@link DATAPOINT_NAME} first, so
  * nothing but `[0-9A-Za-z_:.-]` reaches the script text. The program name goes
- * through the runner's `##name##` placeholder (escaped there).
+ * through the runner's `##name##` placeholder (escaped there). A program id
+ * passed to {@link buildDeleteProgram} is digits only, checked before it is
+ * inlined.
+ *
+ * Name lookup counts every program with that name (`ID_PROGRAMS.EnumUsedIDs()`,
+ * the enumeration the WebUI uses to list programs). One match or none behaves
+ * as before. More than one match writes nothing and answers
+ * `{"error":"duplicate","ids":["<id>",...]}`.
  */
 import { ValidationError } from '../../support/errors.js';
 
@@ -47,24 +54,42 @@ function checkedDatapoints(datapoints: readonly string[]): readonly string[] {
   return datapoints;
 }
 
-/** Find the program named `##name##` into `oProg` (null when absent). */
+/**
+ * Find every program named `##name##`. `iMatches` is the count, `sIds` a JSON
+ * array of those ids, and `oProg` the single match (unset when there is none).
+ * A duplicate still assigns `oProg`, but callers must not use it when
+ * `iMatches` is greater than 1.
+ */
 const FIND_PROGRAM = `string sName = "##name##";
 object oPrograms = dom.GetObject(ID_PROGRAMS);
 object oProg;
 string sPid;
+string sIds = "";
+string sIdSep = "";
+integer iMatches = 0;
 foreach(sPid, oPrograms.EnumUsedIDs()) {
     object oCand = dom.GetObject(sPid);
     if (oCand) {
         if (oCand.Name() == sName) {
             oProg = oCand;
+            sIds = sIds # sIdSep # "\\"" # sPid # "\\"";
+            sIdSep = ",";
+            iMatches = iMatches + 1;
         }
     }
 }`;
 
+/** Answer a duplicate name and skip the caller's body. The body is the `else`. */
+const UNLESS_DUPLICATE = `if (iMatches > 1) {
+    Write("{\\"error\\":\\"duplicate\\",\\"ids\\":[" # sIds # "]}");
+} else {`;
+
 /**
  * Create or rewrite the program `##name##` so its conditions are exactly the
- * given data points. Emits `{"programId":"<id>","created":true|false}`, or
- * `{"error":"datapoint","missing":["<dp>",...]}` (nothing is written then).
+ * given data points. Emits `{"programId":"<id>","created":true|false}`,
+ * `{"error":"datapoint","missing":["<dp>",...]}` or
+ * `{"error":"duplicate","ids":[...]}`. A duplicate or a missing data point
+ * writes nothing.
  */
 export function buildEnsureKeyEventProgram(datapoints: readonly string[]): string {
   const dps = checkedDatapoints(datapoints);
@@ -90,6 +115,7 @@ oSc.ConditionChannel(oDp${i}.Channel());`,
     .join('\n');
   return `! nodehomematic:ensureKeyEventProgram
 ${FIND_PROGRAM}
+${UNLESS_DUPLICATE}
 string sMissing = "";
 string sMissSep = "";
 ${lookups}
@@ -127,30 +153,36 @@ ${singles}
         Write("false");
     }
     Write("}");
+}
 }`;
 }
 
 /**
  * Delete the program `##name##`. Emits `{"removed":true|false}`; `false` when
- * no such program exists. `dom.DeleteObject` is the WebUI's own delete
- * (`programs.fn` `DeleteProgram`).
+ * no such program exists. A duplicate name emits
+ * `{"error":"duplicate","ids":[...]}` and deletes nothing. `dom.DeleteObject`
+ * is the WebUI's own delete (`programs.fn` `DeleteProgram`).
  */
 export const REMOVE_KEY_EVENT_PROGRAM = `! nodehomematic:removeKeyEventProgram
 ${FIND_PROGRAM}
-if (oProg) {
-    dom.DeleteObject(oProg.ID());
-    Write("{\\"removed\\":true}");
-} else {
-    Write("{\\"removed\\":false}");
+${UNLESS_DUPLICATE}
+    if (oProg) {
+        dom.DeleteObject(oProg.ID());
+        Write("{\\"removed\\":true}");
+    } else {
+        Write("{\\"removed\\":false}");
+    }
 }`;
 
 /**
  * Read the program `##name##`: `{"found":false}` or
  * `{"found":true,"programId":"<id>","datapoints":["<dp name>",...]}` from the
- * first condition's single conditions (`LeftVal` data point names).
+ * first condition's single conditions (`LeftVal` data point names). A duplicate
+ * name answers `{"error":"duplicate","ids":[...]}` and reads no conditions.
  */
 export const GET_KEY_EVENT_PROGRAM = `! nodehomematic:getKeyEventProgram
 ${FIND_PROGRAM}
+${UNLESS_DUPLICATE}
 if (!oProg) {
     Write("{\\"found\\":false}");
 } else {
@@ -176,4 +208,42 @@ if (!oProg) {
         }
     }
     Write("]}");
+}
 }`;
+
+/** Digits only: a program id is inlined into the script, so nothing else may reach it. */
+const PROGRAM_ID = /^\d+$/;
+
+/**
+ * Delete the program `programId`. Emits `{"removed":true}` only when the id is
+ * a member of `ID_PROGRAMS` (`EnumUsedIDs()`, the same enumeration the WebUI
+ * uses to list programs — a channel, a room or any other object is not in that
+ * set, so it is never deleted). `dom.GetObject` then `dom.DeleteObject` is
+ * eq-3/occu `WebUI/www/rega/esp/programs.fn` `DeleteProgram`. Anything else
+ * emits `{"removed":false}`.
+ */
+export function buildDeleteProgram(programId: string): string {
+  if (!PROGRAM_ID.test(programId)) {
+    throw new ValidationError(`Invalid program id "${programId}".`);
+  }
+  return `! nodehomematic:deleteProgram
+string sId = "${programId}";
+string sPid;
+boolean bProgram = false;
+foreach(sPid, dom.GetObject(ID_PROGRAMS).EnumUsedIDs()) {
+    if (sPid == sId) {
+        bProgram = true;
+    }
+}
+if (bProgram) {
+    object oProg = dom.GetObject(sId);
+    if (oProg) {
+        dom.DeleteObject(oProg.ID());
+        Write("{\\"removed\\":true}");
+    } else {
+        Write("{\\"removed\\":false}");
+    }
+} else {
+    Write("{\\"removed\\":false}");
+}`;
+}
