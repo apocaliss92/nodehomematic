@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-14
+
 ### Added
 
 - `deleteProgram(programId)` deletes one CCU program by its ReGa id (digits only). A missing id, or an id that is not a program, returns `{ removed: false }` and deletes nothing. Needs WebUI credentials. The script deletes only an id listed by `ID_PROGRAMS.EnumUsedIDs()`, then `dom.DeleteObject` (`programs.fn` `DeleteProgram`).
