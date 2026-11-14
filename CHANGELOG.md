@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `diagnoseKeyEvents(deviceAddress)`: a read-only diagnosis of "why does a HmIP key not deliver `PRESS_SHORT`?". For the device's key channels it reads the central link counter, direct links, VALUES and MASTER over XML-RPC, the maintenance channel `:0` (`CONFIG_PENDING`, `UNREACH`, `RSSI_DEVICE`, `RSSI_PEER`, `UPDATE_PENDING`), the ReGa channel and `PRESS_*` data point objects (value, last update) and every program whose condition references them (needs WebUI credentials; otherwise `rega.available` is `false`), plus when this client last received an event per parameter and the interface's connection state. Each section fails on its own with `{ ok: false, error }`. ReGa properties are cited in `src/central/rega/key-diagnosis.ts`; unverified against a live CCU.
+
 ## 0.7.0
 
 ### Added

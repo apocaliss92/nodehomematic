@@ -169,6 +169,14 @@ interface InterfaceRuntime {
   pingSeq: number;
 }
 
+/** Snapshot of one interface's connection health. */
+export interface ConnectionInfo {
+  readonly state: ClientState;
+  /** Epoch ms of the latest inbound event on the interface, or `null` when none yet. */
+  readonly lastEventAt: number | null;
+  readonly callbackAlive: boolean;
+}
+
 export class CentralUnit {
   private readonly centralName: string;
   private readonly host: string;
@@ -392,6 +400,21 @@ export class CentralUnit {
   public async installFirmware(interfaceId: string, deviceAddress: string): Promise<void> {
     const client = this.clientFor(interfaceId);
     await client.installFirmware(deviceAddress);
+  }
+
+  /**
+   * What the connection tracker knows about one interface: its state, the time
+   * of the latest inbound event of ANY kind (`ConnectionStateTracker.recordEvent`,
+   * called by the callback router for every event), and whether the callback
+   * channel is considered alive (`isCallbackAlive`: true until the silence
+   * exceeds the warn interval, or before the first event). Read only.
+   */
+  public getConnectionInfo(interfaceId: string): ConnectionInfo {
+    return {
+      state: this.connectionState.getState(interfaceId),
+      lastEventAt: this.connectionState.getLastEventAt(interfaceId) ?? null,
+      callbackAlive: this.connectionState.isCallbackAlive(interfaceId),
+    };
   }
 
   /** XML-RPC `getLinks(channelAddress, flags)`, routed by interface id. */

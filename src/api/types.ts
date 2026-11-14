@@ -155,6 +155,161 @@ export interface HmKeyEventProgram {
   readonly channelAddresses: string[];
 }
 
+// --- key event diagnosis -------------------------------------------------------
+
+/**
+ * One section of {@link HmKeyEventDiagnosis}. A section that could not be read
+ * is `{ ok: false, error }`; it never fails the whole diagnosis.
+ */
+export type HmDiagnosisSection<T> =
+  { readonly ok: true; readonly data: T } | { readonly ok: false; readonly error: string };
+
+/** A VALUES / MASTER paramset as the interface returned it (parameter name -> raw value). */
+export type HmParamsetValues = Readonly<Record<string, unknown>>;
+
+/** Central link of one channel: XML-RPC `getMetadata(ch, "reportValueUsageData")`. */
+export interface HmKeyCentralLink {
+  /** The `PRESS_SHORT` usage counter, or `null` when the metadata has none. */
+  readonly pressShortCount: number | null;
+  /** `pressShortCount > 0` (aiohomematic `Channel._has_central_link`). */
+  readonly active: boolean;
+}
+
+/** The device's maintenance channel (`:0`) values that tell whether it is reachable and configured. */
+export interface HmKeyDeviceMaintenance {
+  /** Address of the maintenance channel, `<device>:0`. */
+  readonly channelAddress: string;
+  /** `null` when the parameter is absent from the answer. */
+  readonly configPending: unknown;
+  readonly unreach: unknown;
+  readonly rssiDevice: unknown;
+  readonly rssiPeer: unknown;
+  readonly updatePending: unknown;
+}
+
+/** What THIS client received for one parameter, from the library's own data points. */
+export interface HmKeyParameterClientState {
+  readonly parameter: string;
+  /** Whether the library has a data point for it. */
+  readonly known: boolean;
+  /** Epoch ms of the last event applied to the data point, `null` when none arrived. */
+  readonly lastEventAt: number | null;
+  /** The data point's current value (`null` until the first event). */
+  readonly value: unknown;
+}
+
+/** Events THIS client received for one channel. */
+export interface HmKeyChannelClientState {
+  readonly channelAddress: string;
+  /** `PRESS_SHORT`, `PRESS_LONG`, `PRESS_LONG_RELEASE` first, then every other data point. */
+  readonly parameters: readonly HmKeyParameterClientState[];
+}
+
+/** XML-RPC view of one key channel. */
+export interface HmKeyChannelXmlRpc {
+  readonly centralLink: HmDiagnosisSection<HmKeyCentralLink>;
+  /** `getLinks(ch, 0)`. */
+  readonly directLinks: HmDiagnosisSection<readonly HmChannelLink[]>;
+  /** `getParamset(ch, "VALUES")`. */
+  readonly values: HmDiagnosisSection<HmParamsetValues>;
+  /** `getParamset(ch, "MASTER")`, raw: the key settings. */
+  readonly master: HmDiagnosisSection<HmParamsetValues>;
+}
+
+/** One key channel in {@link HmKeyEventDiagnosis}. */
+export interface HmKeyChannelDiagnosis {
+  readonly address: string;
+  /** Channel type from the device description, e.g. `KEY_TRANSCEIVER`. */
+  readonly type: string | null;
+  readonly xmlRpc: HmKeyChannelXmlRpc;
+  readonly client: HmKeyChannelClientState;
+}
+
+/** One ReGa data point of a key channel (`<iface>.<addr>:<n>.PRESS_SHORT` ...). */
+export interface HmKeyRegaDatapoint {
+  /** The ReGa name, `<interface>.<channel address>.<PARAM>`. */
+  readonly name: string;
+  /** Whether the CCU has such a data point; `false` is why no program can use it. */
+  readonly exists: boolean;
+  readonly id: string | null;
+  /** `Value()` as ReGa prints it (a boolean is `"true"` / `"false"`). */
+  readonly value: string | null;
+  /** `Timestamp()` as epoch ms: the last time the CCU UPDATED the data point (any event, even an unchanged value). */
+  readonly timestamp: number | null;
+  /** `LastTimestamp()` as epoch ms: the update before `timestamp`. */
+  readonly lastTimestamp: number | null;
+}
+
+/** The ReGa channel object of a key channel and its key data points. */
+export interface HmKeyRegaChannel {
+  readonly address: string;
+  /** `false` when ReGa has no channel with that address. */
+  readonly found: boolean;
+  readonly id: string | null;
+  readonly name: string | null;
+  readonly visible: boolean | null;
+  /** `Enabled()`; `null` when ReGa answered nothing. */
+  readonly enabled: boolean | null;
+  /** `ReadyConfig()`; `null` when ReGa answered nothing. */
+  readonly readyConfig: boolean | null;
+  /** `LastDPActionTime`: the last time any data point of the channel was acted on, epoch ms. */
+  readonly lastActionAt: number | null;
+  readonly datapoints: readonly HmKeyRegaDatapoint[];
+}
+
+/** A CCU program whose condition references one of the key data points. */
+export interface HmKeyRegaProgram {
+  readonly id: string;
+  readonly name: string;
+  readonly active: boolean | null;
+  /** `Internal()`: a system program the WebUI hides. */
+  readonly internal: boolean | null;
+  /** `ProgramLastExecuteTime`, epoch ms; `null` when it never ran. */
+  readonly lastExecutedAt: number | null;
+  /** The key data point names its conditions reference. */
+  readonly datapoints: readonly string[];
+}
+
+/** What the CCU's ReGa knows about the key channels. */
+export interface HmKeyRegaState {
+  readonly channels: readonly HmKeyRegaChannel[];
+  /** Empty when no program references a key data point. */
+  readonly programs: readonly HmKeyRegaProgram[];
+}
+
+/** The ReGa part of the diagnosis: unavailable (no WebUI credentials, script failure) or read. */
+export type HmKeyRegaDiagnosis =
+  | { readonly available: true; readonly state: HmKeyRegaState }
+  | { readonly available: false; readonly reason: string };
+
+/** Connection health of the device's interface, from the library's own tracker. */
+export interface HmKeyInterfaceClientState {
+  readonly interfaceId: string;
+  /** Connection state, e.g. `CONNECTED`. */
+  readonly state: string;
+  /** Epoch ms of the latest event of ANY kind received on the interface, `null` when none. */
+  readonly lastEventAt: number | null;
+  /** The callback is alive: no silence beyond the warn interval. */
+  readonly callbackAlive: boolean;
+}
+
+/** Result of {@link Homematic.diagnoseKeyEvents}. */
+export interface HmKeyEventDiagnosis {
+  readonly deviceAddress: string;
+  readonly interfaceId: string;
+  /** Epoch ms the diagnosis was taken. */
+  readonly takenAt: number;
+  /** The maintenance channel `:0` over XML-RPC. */
+  readonly maintenance: HmDiagnosisSection<HmKeyDeviceMaintenance>;
+  /** Events this client received on the maintenance channel. */
+  readonly maintenanceClient: HmKeyChannelClientState;
+  /** Key channels found on the device (empty when it has none). */
+  readonly channels: readonly HmKeyChannelDiagnosis[];
+  /** ReGa data points and programs for the key channels. */
+  readonly rega: HmKeyRegaDiagnosis;
+  readonly interfaceClient: HmKeyInterfaceClientState;
+}
+
 /** A public snapshot of a single device. */
 
 export interface HmDevice {

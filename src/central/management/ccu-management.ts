@@ -35,6 +35,7 @@ import type { InstallModeCall, RadioGatewayInfo } from '../../transport/interfac
 import { decodeRegaName, runScript, type RegaPostClient } from '../rega/rega-runner.js';
 import { CcuTopology } from './ccu-topology.js';
 import { CcuKeyPrograms } from './ccu-key-programs.js';
+import { CcuKeyDiagnosis } from './ccu-key-diagnosis.js';
 import {
   ACKNOWLEDGE_SERVICE_MESSAGE,
   GET_CCU_PLATFORM,
@@ -520,6 +521,11 @@ export class CcuManagement {
   /** The key-event program service (HmIP key presses), on this service's session. */
   public keyPrograms(): CcuKeyPrograms {
     return new CcuKeyPrograms((label, script, params) => this.rega(label, script, params));
+  }
+
+  /** The read-only key diagnosis (ReGa side), on this service's session. */
+  public keyDiagnosis(): CcuKeyDiagnosis {
+    return new CcuKeyDiagnosis((label, script, params) => this.rega(label, script, params));
   }
 
   // --- internals ---------------------------------------------------------------

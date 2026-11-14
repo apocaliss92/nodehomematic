@@ -86,6 +86,11 @@ export class ConnectionStateTracker {
     this.lastEventAt.set(interfaceId, at);
   }
 
+  /** Time of the latest inbound event recorded for an interface, or `undefined`. */
+  public getLastEventAt(interfaceId: string): number | undefined {
+    return this.lastEventAt.get(interfaceId);
+  }
+
   /**
    * True if the callback channel is considered alive: either no event has been
    * recorded yet (we have no evidence of silence) or the elapsed time since the

@@ -35,6 +35,7 @@ import { GenericDataPoint } from '../model/data-point.js';
 import { convertFromCcu, convertToCcu } from '../model/converter.js';
 import { parameterSpecFromData } from '../central/graph.js';
 import type { ModelDevice } from '../model/device.js';
+import { diagnoseKeyEvents } from './key-event-diagnosis.js';
 import {
   GET_LINKS_FLAGS,
   REPORT_VALUE_USAGE_DATA,
@@ -89,6 +90,7 @@ import type {
   HmGroupCreate,
   HmGroupUpdate,
   HmInstallModeRequest,
+  HmKeyEventDiagnosis,
   HmKeyEventProgram,
   HmKeyEventProgramInput,
   HmKeyEventProgramResult,
@@ -549,6 +551,38 @@ export class Homematic {
   /** The key event program `name` and the channels it listens to, or `null`. Needs WebUI credentials. */
   public async getKeyEventProgram(name: string): Promise<HmKeyEventProgram | null> {
     return this.#requireManagement().keyPrograms().get(name);
+  }
+
+  /**
+   * Read-only diagnosis of "why does a key of this device not deliver
+   * `PRESS_SHORT` to this client?": for the device's key channels it collects
+   * the XML-RPC side (central link, direct links, VALUES, MASTER, and the
+   * maintenance channel `:0`), the ReGa side (channel and key data point
+   * objects with their last update, and the programs that reference them;
+   * needs WebUI credentials, otherwise `rega.available` is `false`) and what
+   * this client itself received. Each section fails on its own with
+   * `{ ok: false, error }`. Sources and semantics: `key-event-diagnosis.ts`.
+   * Throws {@link ValidationError} for an unknown device or before `start()`.
+   */
+  public async diagnoseKeyEvents(deviceAddress: string): Promise<HmKeyEventDiagnosis> {
+    const management = this.#requireManagement();
+    const device = this.#devicesByAddress.get(deviceAddress);
+    if (device === undefined) {
+      throw new ValidationError(`Unknown device "${deviceAddress}".`);
+    }
+    return diagnoseKeyEvents(
+      {
+        getMetadata: (iface, address, dataId) => this.#central.getMetadata(iface, address, dataId),
+        getLinks: (iface, address, flags) => this.#central.getLinks(iface, address, flags),
+        readParamset: (iface, address, key) => this.#central.readParamset(iface, address, key),
+        getParamsetSpec: (iface, address, key) =>
+          this.#central.getParamsetSpec(iface, address, key),
+        getConnectionInfo: (iface) => this.#central.getConnectionInfo(iface),
+        readRega: (iface, addresses) => management.keyDiagnosis().read(iface, addresses),
+        now: () => Date.now(),
+      },
+      device,
+    );
   }
 
   // --- direct links + switch link profiles ------------------------------------
