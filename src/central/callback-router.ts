@@ -142,7 +142,7 @@ export class CallbackRouter {
     const dpk = makeDpk(interfaceId, channelAddress, ParamsetKey.VALUES, parameter);
     const receivedAt = this.now();
     this.valueCache.add(dpk, value, receivedAt);
-    await this.eventBus.publish({ type: 'valueReceived', dpk, value, receivedAt });
+    await this.eventBus.publish({ type: 'valueReceived', dpk, value, receivedAt, origin: 'event' });
   }
 
   private async routeNewDevices(

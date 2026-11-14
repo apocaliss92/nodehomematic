@@ -34,6 +34,7 @@ const PARAMSETS: Readonly<Record<string, Record<string, ParameterData>>> = {
   'VCU1:1|VALUES': {
     STATE: { TYPE: 'BOOL', OPERATIONS: 1 | 2 | 4, FLAGS: 1 },
     LEVEL: { TYPE: 'FLOAT', OPERATIONS: 1 | 2 | 4, FLAGS: 1, MIN: 0, MAX: 100 },
+    PRESS_SHORT: { TYPE: 'ACTION', OPERATIONS: 2 | 4, FLAGS: 1 },
   },
   'VCU1:1|MASTER': {
     CYCLIC_INFO_MSG_DIS: { TYPE: 'INTEGER', OPERATIONS: 1 | 2, FLAGS: 1, MIN: 0, MAX: 100 },
@@ -136,10 +137,36 @@ describe('Homematic facade', () => {
     await hm.stop();
   });
 
-  async function pushValue(parameter: string, value: XmlRpcValue, at: number): Promise<void> {
+  async function pushValue(
+    parameter: string,
+    value: XmlRpcValue,
+    at: number,
+    origin?: 'event' | 'seed',
+  ): Promise<void> {
     const dpk = makeDpk(INTERFACE_ID, 'VCU1:1', ParamsetKey.VALUES, parameter);
-    await central.eventBus.publish({ type: 'valueReceived', dpk, value, receivedAt: at });
+    await central.eventBus.publish({ type: 'valueReceived', dpk, value, receivedAt: at, origin });
   }
+
+  it('emits every pushed key press, although each one carries the same true', async () => {
+    const presses: number[] = [];
+    hm.on('valueChanged', (e) => {
+      if (e.parameter === 'PRESS_SHORT') presses.push(e.ts);
+    });
+    await pushValue('PRESS_SHORT', true, 1000, 'event');
+    await pushValue('PRESS_SHORT', true, 2000, 'event');
+    await pushValue('PRESS_SHORT', true, 3000, 'event');
+    expect(presses).toEqual([1000, 2000, 3000]);
+  });
+
+  it('never replays a seeded key press as a new one', async () => {
+    const presses: number[] = [];
+    hm.on('valueChanged', (e) => {
+      if (e.parameter === 'PRESS_SHORT') presses.push(e.ts);
+    });
+    await pushValue('PRESS_SHORT', true, 1000, 'seed');
+    await pushValue('PRESS_SHORT', true, 1500);
+    expect(presses).toEqual([]);
+  });
 
   it('accepts the VirtualDevices interface name at construction', () => {
     expect(
@@ -182,7 +209,7 @@ describe('Homematic facade', () => {
     expect(device.type).toBe('HmIP-SWDO');
     const channel1 = device.channels.find((c) => c.address === 'VCU1:1')!;
     const params = channel1.dataPoints.map((dp) => dp.parameter).sort();
-    expect(params).toEqual(['LEVEL', 'STATE']);
+    expect(params).toEqual(['LEVEL', 'PRESS_SHORT', 'STATE']);
     const state = channel1.dataPoints.find((dp) => dp.parameter === 'STATE')!;
     expect(state.type).toBe('BOOL');
     expect(state.writable).toBe(true);

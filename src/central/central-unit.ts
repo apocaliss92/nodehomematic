@@ -772,7 +772,13 @@ export class CentralUnit {
       for (const [parameter, rawValue] of Object.entries(values)) {
         const dpk = makeDpk(runtime.interfaceId, channelAddress, ParamsetKey.VALUES, parameter);
         this.valueCache.add(dpk, rawValue, receivedAt);
-        await this.bus.publish({ type: 'valueReceived', dpk, value: rawValue, receivedAt });
+        await this.bus.publish({
+          type: 'valueReceived',
+          dpk,
+          value: rawValue,
+          receivedAt,
+          origin: 'seed',
+        });
         count += 1;
       }
     } catch {

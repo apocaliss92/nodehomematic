@@ -14,6 +14,13 @@ export interface ValueReceivedEvent {
   readonly value: unknown;
   /** Monotonic/epoch millis when the value was received. */
   readonly receivedAt: number;
+  /**
+   * `event`: the CCU pushed it through the XML-RPC callback (a live change or
+   * a key press). `seed`: read back from a VALUES paramset (start-up seeding).
+   * Absent is treated like `seed` for ACTION parameters: only a pushed event
+   * may count as a key press.
+   */
+  readonly origin?: 'event' | 'seed';
 }
 
 /** A device was added to the registry. */

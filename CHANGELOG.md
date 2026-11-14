@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.1
+
+### Fixed
+
+- A key press (`PRESS_SHORT`, `PRESS_LONG`, any ACTION parameter) pushed by the CCU is emitted as `valueChanged` every time. Each press carries the same `true`, so the "value unchanged" check swallowed every press after the first until something reset the value. A value read back from a VALUES paramset (start-up seeding) is never emitted as a press.
+
 ## 0.8.0
 
 ### Added

@@ -22,7 +22,7 @@ import type { InterfaceClient } from '../transport/interface-client.js';
 import type { StorageBackend } from '../central/store/storage-backend.js';
 import type { DeviceNode } from '../central/graph.js';
 import type { ParameterData } from '../transport/xmlrpc/types.js';
-import { Interface, ParamsetKey, isWritable } from '../support/constants.js';
+import { Interface, ParameterType, ParamsetKey, isWritable } from '../support/constants.js';
 import {
   BaseHomematicError,
   ClientError,
@@ -1276,7 +1276,8 @@ export class Homematic {
     this.#unsubscribers.push(
       bus.subscribe({
         type: 'valueReceived',
-        handler: (event) => this.#onValueReceived(event.dpk, event.value, event.receivedAt),
+        handler: (event) =>
+          this.#onValueReceived(event.dpk, event.value, event.receivedAt, event.origin === 'event'),
       }),
       bus.subscribe({
         type: 'deviceAdded',
@@ -1322,11 +1323,18 @@ export class Homematic {
     }
   }
 
-  #onValueReceived(dpk: DataPointKey, value: unknown, receivedAt: number): void {
+  /**
+   * An ACTION parameter (`PRESS_SHORT`, `PRESS_LONG`, …) is an occurrence, not a
+   * state: every press arrives as the same `true`, so "unchanged" must not
+   * swallow it. A pushed event of an ACTION parameter is always emitted; a
+   * seeded read-back of one never is (it would replay an old press).
+   */
+  #onValueReceived(dpk: DataPointKey, value: unknown, receivedAt: number, pushed: boolean): void {
     const dp = this.#dataPointsById.get(dpkToUniqueId(dpk));
     if (dp === undefined) return;
     const result = dp.applyCcuValue(value, receivedAt);
-    if (!result.changed) return;
+    const occurrence = dp.type === ParameterType.ACTION;
+    if (occurrence ? !pushed : !result.changed) return;
     const channel = dp.dpk.channelAddress;
     this.#emitter.emit('valueChanged', {
       dpId: dp.id,
