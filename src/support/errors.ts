@@ -34,6 +34,26 @@ export class CircuitBreakerOpenError extends BaseHomematicError {}
 /** No interface clients are available to serve a request. */
 export class NoClientsError extends BaseHomematicError {}
 
+/**
+ * A login was not sent because the previous ones failed and the backoff window
+ * is still open. Nothing reached the CCU. `retryAt` (epoch ms, on the session
+ * manager's clock) is when the next real attempt may go out.
+ */
+export class LoginBackoffError extends BaseHomematicError {
+  /** When the next real login attempt may go out (epoch ms). */
+  public readonly retryAt: number;
+  /** Consecutive failed logins so far. */
+  public readonly failures: number;
+
+  public constructor(retryAt: number, failures: number) {
+    super(
+      `login backing off after ${failures} consecutive failure(s); next attempt at ${new Date(retryAt).toISOString()}`,
+    );
+    this.retryAt = retryAt;
+    this.failures = failures;
+  }
+}
+
 /** Authentication/authorization against the CCU failed. */
 export class AuthFailureError extends BaseHomematicError {}
 

@@ -129,6 +129,11 @@ export interface CentralUnitOptions {
   readonly makeInterfaceClient?: (iface: Interface) => InterfaceClient;
   /** Inject a JSON-RPC client (defaults to a real {@link JsonRpcClient}). */
   readonly jsonClient?: JsonRpcClientLike;
+  /**
+   * Base URL of the JSON-RPC endpoint (defaults to `http(s)://<host>`). Tests
+   * point it at a fake CCU; the session is managed exactly as in production.
+   */
+  readonly jsonRpcUrl?: string;
   /** Inject the WebUI HMServer-page transport used for group writes (tests). */
   readonly webUiClient?: WebUiHttp;
   /** Injectable clock. */
@@ -311,10 +316,13 @@ export class CentralUnit {
    */
   public getHubFetcher(): HubFetcher | undefined {
     if (this.jsonClient === undefined) return undefined;
-    const client = this.jsonClient;
+    const session = this.session;
+    if (session === undefined) {
+      return new HubFetcher({ client: this.jsonClient, getSessionId: () => undefined });
+    }
     return new HubFetcher({
-      client,
-      getSessionId: () => this.session?.sessionId,
+      client: session.boundClient(),
+      getSessionId: () => session.ensureSession(),
     });
   }
 
@@ -328,7 +336,7 @@ export class CentralUnit {
    */
   public getManagement(): CcuManagement {
     return new CcuManagement({
-      json: this.jsonClient,
+      json: this.session !== undefined ? this.session.boundClient() : this.jsonClient,
       webUi: this.webUi,
       getSessionId: () =>
         this.session !== undefined ? this.session.ensureSession() : Promise.resolve(undefined),
@@ -605,7 +613,9 @@ export class CentralUnit {
       this.webUi = this.options.webUiClient;
     } else {
       const scheme = this.tls ? 'https' : 'http';
-      const client = new JsonRpcClient({ url: `${scheme}://${this.host}` });
+      const client = new JsonRpcClient({
+        url: this.options.jsonRpcUrl ?? `${scheme}://${this.host}`,
+      });
       this.jsonClient = client;
       this.webUi =
         this.options.webUiClient ?? new WebUiHttpClient({ url: `${scheme}://${this.host}` });
@@ -613,6 +623,7 @@ export class CentralUnit {
         client,
         username: this.credentials.username,
         password: this.credentials.password,
+        now: this.now,
       });
     }
   }
@@ -792,8 +803,9 @@ export class CentralUnit {
   private async fetchDetails(): Promise<DeviceDetails | undefined> {
     if (this.jsonClient === undefined) return undefined;
     try {
-      const sessionId = this.session !== undefined ? await this.session.ensureSession() : undefined;
-      return await mergeDetails(this.jsonClient, sessionId);
+      if (this.session === undefined) return await mergeDetails(this.jsonClient);
+      const sessionId = await this.session.ensureSession();
+      return await mergeDetails(this.session.boundClient(), sessionId);
     } catch {
       // Details are best-effort metadata; discovery proceeds without them.
       return undefined;
@@ -963,6 +975,11 @@ export class CentralUnit {
     }
     await runtime.client.initProxy();
     runtime.pingPong.reset();
+    // The CCU answers again (it may have rebooted and wiped every session): the
+    // next JSON-RPC call logs in at once instead of waiting out the backoff, and
+    // re-validates the session it holds before reusing it.
+    this.session?.resetBackoff();
+    this.session?.markStale();
   }
 
   private async reloadData(interfaceId: string): Promise<void> {

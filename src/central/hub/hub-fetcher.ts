@@ -21,10 +21,13 @@ import { normalizeType, parseSysVarValue, toBool, type SystemVariable } from './
 /** The description marker the CCU sets on extended (writable) system variables. */
 const WRITABLE_MARKER = 'HAHM';
 
-/** Constructor dependencies. The session id is read lazily so it can rotate. */
+/**
+ * Constructor dependencies. The session id is read lazily so it can rotate; an
+ * async getter lets the owner ensure (log in / renew) a session per call.
+ */
 export interface HubFetcherOptions {
   readonly client: RegaPostClient;
-  readonly getSessionId: () => string | undefined;
+  readonly getSessionId: () => string | undefined | Promise<string | undefined>;
 }
 
 /** Read an object property as `unknown` after narrowing the container. */
@@ -66,14 +69,14 @@ function asRecordArray(value: unknown): Record<string, unknown>[] {
  */
 export class HubFetcher {
   private readonly client: RegaPostClient;
-  private readonly getSessionId: () => string | undefined;
+  private readonly getSessionId: () => string | undefined | Promise<string | undefined>;
 
   public constructor(options: HubFetcherOptions) {
     this.client = options.client;
     this.getSessionId = options.getSessionId;
   }
 
-  private sid(): string | undefined {
+  private async sid(): Promise<string | undefined> {
     return this.getSessionId();
   }
 
@@ -83,7 +86,7 @@ export class HubFetcher {
    * tolerated (such a variable is treated as read-only).
    */
   public async fetchSystemVariables(): Promise<SystemVariable[]> {
-    const sid = this.sid();
+    const sid = await this.sid();
     const rawAll = await this.client.post(JsonRpcMethod.SYSVAR_GET_ALL, undefined, sidOpts(sid));
     const entries = asRecordArray(rawAll);
 
@@ -94,7 +97,7 @@ export class HubFetcher {
 
   /** Read a single system variable's raw value by name. */
   public async getSystemVariable(name: string): Promise<HmValue> {
-    const sid = this.sid();
+    const sid = await this.sid();
     const raw = await this.client.post(
       JsonRpcMethod.SYSVAR_GET_VALUE_BY_NAME,
       { name },
@@ -113,7 +116,7 @@ export class HubFetcher {
    * `SET_SYSTEM_VARIABLE`. A null value is rejected.
    */
   public async setSystemVariable(name: string, value: HmValue): Promise<void> {
-    const sid = this.sid();
+    const sid = await this.sid();
     if (value === null) {
       throw new ValidationError(`Cannot set system variable "${name}" to null`);
     }
@@ -134,7 +137,7 @@ export class HubFetcher {
 
   /** Fetch all programs, coercing flags to booleans. */
   public async fetchPrograms(): Promise<HmProgramRecord[]> {
-    const sid = this.sid();
+    const sid = await this.sid();
     const raw = await this.client.post(JsonRpcMethod.PROGRAM_GET_ALL, undefined, sidOpts(sid));
     return asRecordArray(raw).map((entry) => {
       const lastExecuteTime = entry.lastExecuteTime;
@@ -153,13 +156,13 @@ export class HubFetcher {
 
   /** Execute a program by id. */
   public async runProgram(id: string): Promise<void> {
-    const sid = this.sid();
+    const sid = await this.sid();
     await this.client.post(JsonRpcMethod.PROGRAM_EXECUTE, { id }, sidOpts(sid));
   }
 
   /** Enable/disable a program via the ReGa `SET_PROGRAM_STATE` script. */
   public async setProgramActive(id: string, active: boolean): Promise<void> {
-    const sid = this.sid();
+    const sid = await this.sid();
     await runScript(this.client, sid, SET_PROGRAM_STATE, { id, state: active ? 1 : 0 });
   }
 
@@ -171,7 +174,7 @@ export class HubFetcher {
     rooms: Map<string, string[]>;
     functions: Map<string, string[]>;
   }> {
-    const sid = this.sid();
+    const sid = await this.sid();
     const parsed = await runScript(this.client, sid, GET_ROOMS_FUNCTIONS);
     return {
       rooms: toDecodedMap(isRecord(parsed) ? parsed.rooms : undefined),
@@ -181,7 +184,7 @@ export class HubFetcher {
 
   /** Build the `SYSVAR_DESCRIPTIONS` map: sysvar id → description text. */
   private async fetchSysVarDescriptions(): Promise<Map<string, string>> {
-    const sid = this.sid();
+    const sid = await this.sid();
     const out = new Map<string, string>();
     try {
       const parsed = await runScript(this.client, sid, SYSVAR_DESCRIPTIONS);

@@ -65,6 +65,12 @@ export interface FakeCcuOptions {
    * fail. Discovery must still complete.
    */
   readonly failDeviceDetails?: boolean;
+  /**
+   * When true, JSON-RPC sessions behave like a real CCU: each login issues a
+   * new id, a call with an unknown id is `access denied`, and {@link reboot}
+   * wipes every session. Off by default (one fixed id, never checked).
+   */
+  readonly strictSessions?: boolean;
 }
 
 /** One `reportValueUsage` call the fake CCU has seen. */
@@ -286,6 +292,13 @@ export class FakeCcu {
   private readonly failDeviceDetails: boolean;
   /** When true, every XML-RPC request is refused (simulated outage). */
   private down = false;
+  /** When true, the WebUI answers HTTP 503 (a CCU still booting). */
+  private webUiBooting = false;
+  private readonly strictSessions: boolean;
+  private readonly liveSessions = new Set<string>();
+  private sessionSeq = 0;
+  private loginRequests = 0;
+  private serviceMessageScripts = 0;
   /** When true, `system.listMethods` faults (forces the getVersion fallback). */
   private listMethodsFails = false;
   /** Count of `getParamsetDescription` calls served (for warm-start assertions). */
@@ -301,6 +314,7 @@ export class FakeCcu {
     this.devices = [...CANNED_DEVICES, ...(options.extraDevices ?? [])];
     this.paramsets = { ...CANNED_PARAMSETS, ...(options.extraParamsets ?? {}) };
     this.failDeviceDetails = options.failDeviceDetails ?? false;
+    this.strictSessions = options.strictSessions ?? false;
     this.rega = new FakeRegaTopology(this.devices, cannedNames(), [
       { id: '1234', name: 'Living Room', channels: ['VCU0000001:1'] },
     ]);
@@ -465,6 +479,32 @@ export class FakeCcu {
   /** Resume serving XML-RPC requests after a {@link dropConnection}. */
   public restore(): void {
     this.down = false;
+  }
+
+  /**
+   * Simulate a CCU reboot in progress: XML-RPC is down, the registration is
+   * gone, the WebUI answers HTTP 503 and every JSON-RPC session is wiped.
+   */
+  public reboot(): void {
+    this.dropConnection();
+    this.webUiBooting = true;
+    this.liveSessions.clear();
+  }
+
+  /** The rebooted CCU is up again (sessions stay wiped). */
+  public finishBoot(): void {
+    this.webUiBooting = false;
+    this.restore();
+  }
+
+  /** `Session.login` requests received, including refused ones. */
+  public get loginRequestCount(): number {
+    return this.loginRequests;
+  }
+
+  /** Service-message ReGa scripts answered (succeeded). */
+  public get serviceMessageScriptCount(): number {
+    return this.serviceMessageScripts;
   }
 
   /** Toggle whether `system.listMethods` faults (to exercise getVersion fallback). */
@@ -827,6 +867,19 @@ export class FakeCcu {
       return;
     }
 
+    if (method === 'Session.login') this.loginRequests += 1;
+    if (this.webUiBooting) {
+      res.writeHead(503, { 'Content-Type': 'text/html' });
+      res.end('<html><body>503 Service Unavailable</body></html>');
+      return;
+    }
+    if (this.strictSessions && method !== 'Session.login') {
+      const sid = typeof params['_session_id_'] === 'string' ? params['_session_id_'] : '';
+      if (!this.liveSessions.has(sid)) {
+        writeJson(res, { result: null, error: { code: 401, message: 'access denied' }, id: 0 });
+        return;
+      }
+    }
     const { result, error } = this.dispatchJsonRpc(method, params);
     writeJson(res, { result, error, id: 0 });
   }
@@ -900,6 +953,10 @@ export class FakeCcu {
     const script = String(params['script'] ?? '');
     const topology = this.rega.run(script);
     if (topology !== undefined) return topology;
+    if (script.includes('ID_SERVICES')) {
+      this.serviceMessageScripts += 1;
+      return '[]';
+    }
     if (script.includes('ID_SYSTEM_VARIABLES')) {
       return JSON.stringify(CANNED_SYSVAR_DESCRIPTIONS);
     }
@@ -927,7 +984,11 @@ export class FakeCcu {
     const user = String(params['username'] ?? '');
     const pass = String(params['password'] ?? '');
     if (user === this.username && pass === this.password) {
-      return { result: SESSION_ID, error: null };
+      if (!this.strictSessions) return { result: SESSION_ID, error: null };
+      this.sessionSeq += 1;
+      const id = `SID-${this.sessionSeq}`;
+      this.liveSessions.add(id);
+      return { result: id, error: null };
     }
     return { result: null, error: { code: -32001, message: 'access denied' } };
   }

@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager } from '../../../../src/transport/jsonrpc/session.js';
 import { JsonRpcMethod, SESSION_ID_PARAM } from '../../../../src/transport/jsonrpc/methods.js';
-import { AuthFailureError, NoConnectionError } from '../../../../src/support/errors.js';
+import {
+  AuthFailureError,
+  LoginBackoffError,
+  NoConnectionError,
+} from '../../../../src/support/errors.js';
 import type { JsonRpcClient } from '../../../../src/transport/jsonrpc/client.js';
 
 interface PostCall {
@@ -186,60 +190,205 @@ describe('SessionManager.logout', () => {
   });
 });
 
-describe('SessionManager login rate limiting', () => {
-  it('after 10 consecutive failed logins throws and stops retrying', async () => {
-    fake.when(JsonRpcMethod.SESSION_LOGIN, () => Promise.reject(new NoConnectionError('down')));
+describe('SessionManager login backoff', () => {
+  function failingManager(): { mgr: SessionManager; setUp: (up: boolean) => void } {
+    let up = false;
+    fake.when(JsonRpcMethod.SESSION_LOGIN, () =>
+      up ? Promise.resolve('SID-BACK') : Promise.reject(new NoConnectionError('down')),
+    );
     const mgr = new SessionManager({
       client: fake.asClient(),
       username: 'admin',
       password: 'pw',
       now,
     });
+    return { mgr, setUp: (value) => void (up = value) };
+  }
 
-    for (let i = 0; i < 10; i += 1) {
-      // Attach the rejection assertion BEFORE advancing timers so the
-      // rejection is never momentarily unhandled.
-      const assertion = expect(mgr.login()).rejects.toBeInstanceOf(NoConnectionError);
-      await vi.advanceTimersByTimeAsync(60_000);
-      await assertion;
+  /** Fail `count` real login attempts, each once the previous window has passed. */
+  async function failLogins(mgr: SessionManager, count: number): Promise<void> {
+    for (let i = 0; i < count; i += 1) {
+      clock += 300_000;
+      await expect(mgr.login()).rejects.toBeInstanceOf(NoConnectionError);
     }
+  }
 
-    // The 11th attempt is rejected without hitting the network again.
-    const before = fake.calls.length;
-    await expect(mgr.login()).rejects.toBeTruthy();
-    expect(fake.calls.length).toBe(before);
+  function loginCalls(): number {
+    return fake.calls.filter((c) => c.method === JsonRpcMethod.SESSION_LOGIN).length;
+  }
+
+  it('never locks out: after 12 failures a login is attempted again once the window passed', async () => {
+    const { mgr, setUp } = failingManager();
+    await failLogins(mgr, 12);
+    expect(loginCalls()).toBe(12);
+    setUp(true);
+    clock += 300_000;
+    await expect(mgr.login()).resolves.toBe('SID-BACK');
+    expect(loginCalls()).toBe(13);
   });
 
-  it('resets the failure counter after a successful login', async () => {
-    let fail = true;
-    fake.when(JsonRpcMethod.SESSION_LOGIN, () => {
-      if (fail) return Promise.reject(new NoConnectionError('down'));
-      return Promise.resolve('SID-OK');
-    });
+  it('fails fast inside the window with a typed error naming the next attempt', async () => {
+    const { mgr } = failingManager();
+    await expect(mgr.login()).rejects.toBeInstanceOf(NoConnectionError);
+    clock += 1_000;
+    await expect(mgr.login()).rejects.toBeInstanceOf(NoConnectionError);
+    // Two failures: the window is 2 s from the last one, nothing is sent until then.
+    const before = loginCalls();
+    const err = await mgr.login().then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(LoginBackoffError);
+    expect(err instanceof LoginBackoffError ? err.retryAt : 0).toBe(clock + 2_000);
+    expect(loginCalls()).toBe(before);
+    clock += 2_000;
+    await expect(mgr.login()).rejects.toBeInstanceOf(NoConnectionError);
+    expect(loginCalls()).toBe(before + 1);
+  });
+
+  it('caps the window at 5 minutes', async () => {
+    const { mgr, setUp } = failingManager();
+    await failLogins(mgr, 20);
+    setUp(true);
+    clock += 299_999;
+    await expect(mgr.login()).rejects.toBeInstanceOf(LoginBackoffError);
+    clock += 1;
+    await expect(mgr.login()).resolves.toBe('SID-BACK');
+  });
+
+  it('resetBackoff lets the next login go out at once (the CCU answered again)', async () => {
+    const { mgr, setUp } = failingManager();
+    await failLogins(mgr, 11);
+    await expect(mgr.login()).rejects.toBeInstanceOf(LoginBackoffError);
+    setUp(true);
+    mgr.resetBackoff();
+    await expect(mgr.login()).resolves.toBe('SID-BACK');
+  });
+
+  it('a success resets the backoff', async () => {
+    const { mgr, setUp } = failingManager();
+    await failLogins(mgr, 5);
+    setUp(true);
+    clock += 300_000;
+    await mgr.login();
+    setUp(false);
+    await expect(mgr.login()).rejects.toBeInstanceOf(NoConnectionError);
+    clock += 1_000;
+    await expect(mgr.login()).rejects.toBeInstanceOf(NoConnectionError);
+  });
+
+  it('concurrent callers share ONE login (no burst, no leaked sessions)', async () => {
+    let n = 0;
+    fake.when(JsonRpcMethod.SESSION_LOGIN, () => Promise.resolve(`SID-${++n}`));
     const mgr = new SessionManager({
       client: fake.asClient(),
       username: 'admin',
       password: 'pw',
       now,
     });
+    const ids = await Promise.all(Array.from({ length: 30 }, () => mgr.ensureSession()));
+    expect(new Set(ids)).toEqual(new Set(['SID-1']));
+    expect(loginCalls()).toBe(1);
+  });
 
-    // A few failures (under the cap).
-    for (let i = 0; i < 3; i += 1) {
-      const assertion = expect(mgr.login()).rejects.toBeInstanceOf(NoConnectionError);
-      await vi.advanceTimersByTimeAsync(60_000);
-      await assertion;
-    }
-    fail = false;
-    const success = expect(mgr.login()).resolves.toBe('SID-OK');
-    await vi.advanceTimersByTimeAsync(60_000);
-    await success;
+  it('concurrent failing callers count as ONE failure', async () => {
+    const { mgr, setUp } = failingManager();
+    const all = await Promise.allSettled(Array.from({ length: 30 }, () => mgr.ensureSession()));
+    expect(all.every((r) => r.status === 'rejected')).toBe(true);
+    expect(loginCalls()).toBe(1);
+    setUp(true);
+    clock += 1_000;
+    await expect(mgr.ensureSession()).resolves.toBe('SID-BACK');
+  });
+});
 
-    // Counter reset: another full run of failures must again be allowed.
-    fail = true;
-    for (let i = 0; i < 9; i += 1) {
-      const assertion = expect(mgr.login()).rejects.toBeInstanceOf(NoConnectionError);
-      await vi.advanceTimersByTimeAsync(60_000);
-      await assertion;
-    }
+describe('SessionManager stale sessions', () => {
+  it('a renew answered false drops the session and logs in again', async () => {
+    let n = 0;
+    fake.when(JsonRpcMethod.SESSION_LOGIN, () => Promise.resolve(`SID-${++n}`));
+    fake.when(JsonRpcMethod.SESSION_RENEW, () => Promise.resolve(false));
+    const mgr = new SessionManager({
+      client: fake.asClient(),
+      username: 'admin',
+      password: 'pw',
+      now,
+    });
+    await mgr.login();
+    clock += 91_000;
+    await expect(mgr.ensureSession()).resolves.toBe('SID-2');
+  });
+
+  it('a renew refused as access denied logs in even when the logout of the dead session fails', async () => {
+    let n = 0;
+    fake.when(JsonRpcMethod.SESSION_LOGIN, () => Promise.resolve(`SID-${++n}`));
+    fake.when(JsonRpcMethod.SESSION_RENEW, () =>
+      Promise.reject(new AuthFailureError('access denied')),
+    );
+    fake.when(JsonRpcMethod.SESSION_LOGOUT, () =>
+      Promise.reject(new AuthFailureError('access denied')),
+    );
+    const mgr = new SessionManager({
+      client: fake.asClient(),
+      username: 'admin',
+      password: 'pw',
+      now,
+    });
+    await mgr.login();
+    clock += 91_000;
+    await expect(mgr.ensureSession()).resolves.toBe('SID-2');
+  });
+
+  it('markStale forces a renew on the next ensureSession', async () => {
+    fake.when(JsonRpcMethod.SESSION_LOGIN, () => Promise.resolve('SID-1'));
+    const mgr = new SessionManager({
+      client: fake.asClient(),
+      username: 'admin',
+      password: 'pw',
+      now,
+    });
+    await mgr.login();
+    mgr.markStale();
+    await mgr.ensureSession();
+    expect(fake.calls.filter((c) => c.method === JsonRpcMethod.SESSION_RENEW)).toHaveLength(1);
+  });
+
+  it('the session-bound client re-logs in and retries once on access denied', async () => {
+    let n = 0;
+    fake.when(JsonRpcMethod.SESSION_LOGIN, () => Promise.resolve(`SID-${++n}`));
+    fake.when('ReGa.runScript', (c) =>
+      c.opts?.sessionId === 'SID-1'
+        ? Promise.reject(new AuthFailureError('access denied'))
+        : Promise.resolve('ok'),
+    );
+    const mgr = new SessionManager({
+      client: fake.asClient(),
+      username: 'admin',
+      password: 'pw',
+      now,
+    });
+    const sid = await mgr.ensureSession();
+    await expect(mgr.boundClient().post('ReGa.runScript', {}, { sessionId: sid })).resolves.toBe(
+      'ok',
+    );
+    expect(mgr.sessionId).toBe('SID-2');
+  });
+
+  it('logout waits for an in-flight login so the new session is not leaked', async () => {
+    let resolveLogin: (v: string) => void = () => undefined;
+    fake.when(JsonRpcMethod.SESSION_LOGIN, () => new Promise<string>((r) => (resolveLogin = r)));
+    const mgr = new SessionManager({
+      client: fake.asClient(),
+      username: 'admin',
+      password: 'pw',
+      now,
+    });
+    const pending = mgr.login();
+    const out = mgr.logout();
+    resolveLogin('SID-LATE');
+    await pending;
+    await out;
+    const logout = fake.calls.find((c) => c.method === JsonRpcMethod.SESSION_LOGOUT);
+    expect(logout?.opts?.sessionId).toBe('SID-LATE');
+    expect(mgr.sessionId).toBeUndefined();
   });
 });
