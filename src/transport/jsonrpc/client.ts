@@ -5,17 +5,22 @@
  * response, and maps errors / transport failures to typed errors.
  *
  * A small semaphore caps the number of concurrent in-flight POSTs, mirroring
- * aiohomematic's `MAX_CONCURRENT_HTTP_SESSIONS`.
+ * aiohomematic's `MAX_CONCURRENT_HTTP_SESSIONS`. An HTTP 5xx (a CCU still
+ * booting answers 503) is a {@link BackendUnavailableError} and is retried
+ * after each of `retryDelaysMs`, outside the semaphore so a waiting retry
+ * holds no slot. `Session.*` calls are never retried here: the session
+ * manager owns the login backoff.
  */
 import { Agent, fetch, type RequestInit } from 'undici';
 import {
+  BackendUnavailableError,
   ClientError,
   mapJsonRpcError,
   mapTransportError,
   type JsonRpcErrorLike,
 } from '../../support/errors.js';
 import { JSON_RPC_PATH, TIMEOUTS } from '../../support/constants.js';
-import { SESSION_ID_PARAM } from './methods.js';
+import { SESSION_BYPASS_METHODS, SESSION_ID_PARAM } from './methods.js';
 
 /** TLS options for HTTPS endpoints (e.g. CCU self-signed certificates). */
 export interface JsonRpcTlsOptions {
@@ -33,6 +38,8 @@ export interface JsonRpcClientOptions {
   readonly maxConcurrent?: number;
   /** Per-request timeout in milliseconds. Defaults to {@link TIMEOUTS.rpc}. */
   readonly timeoutMs?: number;
+  /** Waits before each retry of an HTTP 5xx answer. Defaults to 0.5 s, 1 s, 2 s. */
+  readonly retryDelaysMs?: readonly number[];
 }
 
 /** Per-call options. */
@@ -49,6 +56,14 @@ interface JsonRpcResponse {
 }
 
 const DEFAULT_MAX_CONCURRENT = 3;
+const DEFAULT_RETRY_DELAYS_MS: readonly number[] = [500, 1_000, 2_000];
+
+/** Resolve after `ms` on the global timer (patchable by fake timers). */
+function delay(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 /**
  * Coerce every param value to a string. Booleans become "true"/"false",
@@ -106,6 +121,7 @@ export class JsonRpcClient {
   private readonly timeoutMs: number;
   private readonly dispatcher: Agent | undefined;
   private readonly semaphore: Semaphore;
+  private readonly retryDelaysMs: readonly number[];
 
   public constructor(options: JsonRpcClientOptions) {
     // url is a base URL; append the JSON-RPC path (strip any trailing slash).
@@ -113,6 +129,7 @@ export class JsonRpcClient {
     this.endpoint = `${base}${JSON_RPC_PATH}`;
     this.timeoutMs = options.timeoutMs ?? TIMEOUTS.rpc;
     this.semaphore = new Semaphore(options.maxConcurrent ?? DEFAULT_MAX_CONCURRENT);
+    this.retryDelaysMs = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
     if (options.tls?.rejectUnauthorized === false) {
       this.dispatcher = new Agent({ connect: { rejectUnauthorized: false } });
     } else {
@@ -141,7 +158,20 @@ export class JsonRpcClient {
       id: 0,
     };
     const body = Buffer.from(JSON.stringify(envelope), 'utf-8');
+    const delays = SESSION_BYPASS_METHODS.has(method) ? [] : this.retryDelaysMs;
 
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.sendGuarded(body);
+      } catch (err) {
+        const wait = delays[attempt];
+        if (!(err instanceof BackendUnavailableError) || wait === undefined) throw err;
+        await delay(wait);
+      }
+    }
+  }
+
+  private async sendGuarded(body: Buffer): Promise<unknown> {
     await this.semaphore.acquire();
     try {
       return await this.send(body);
@@ -155,6 +185,7 @@ export class JsonRpcClient {
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
     let raw: Buffer;
+    let status: number;
     try {
       const init: RequestInit = {
         method: 'POST',
@@ -168,6 +199,7 @@ export class JsonRpcClient {
       if (this.dispatcher) init.dispatcher = this.dispatcher;
 
       const response = await fetch(this.endpoint, init);
+      status = response.status;
       const arrayBuffer = await response.arrayBuffer();
       raw = Buffer.from(arrayBuffer);
     } catch (err) {
@@ -177,6 +209,9 @@ export class JsonRpcClient {
       clearTimeout(timer);
     }
 
+    if (status >= 500) {
+      throw new BackendUnavailableError(status, `JSON-RPC endpoint answered HTTP ${status}`);
+    }
     if (raw.length === 0) {
       throw new ClientError('JSON-RPC response had an empty body');
     }

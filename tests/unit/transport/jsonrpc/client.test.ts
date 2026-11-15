@@ -4,6 +4,7 @@ import { AddressInfo } from 'node:net';
 import { JsonRpcClient } from '../../../../src/transport/jsonrpc/client.js';
 import {
   AuthFailureError,
+  BackendUnavailableError,
   InternalBackendError,
   NoConnectionError,
 } from '../../../../src/support/errors.js';
@@ -174,5 +175,48 @@ describe('JsonRpcClient.post', () => {
     await expect(tlsClient.close()).resolves.toBeUndefined();
     const plain = new JsonRpcClient({ url: 'http://127.0.0.1:1', timeoutMs: 1000 });
     await expect(plain.close()).resolves.toBeUndefined();
+  });
+});
+
+describe('JsonRpcClient HTTP 5xx (a CCU still booting)', () => {
+  function bootingServer(failures: number): { url: Promise<string>; requests: () => number } {
+    let seen = 0;
+    const url = startServer((_req, res) => {
+      seen += 1;
+      if (seen <= failures) {
+        res.writeHead(503, { 'Content-Type': 'text/html' });
+        res.end('<html><body>503 Service Unavailable</body></html>');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ result: 'ok', error: null, id: 0 }));
+    });
+    return { url, requests: () => seen };
+  }
+
+  it('retries a 503 with backoff until the CCU answers', async () => {
+    const booting = bootingServer(2);
+    const client = new JsonRpcClient({ url: await booting.url, retryDelaysMs: [1, 1, 1] });
+    await expect(client.post('ReGa.runScript', { script: 'x' })).resolves.toBe('ok');
+    expect(booting.requests()).toBe(3);
+  });
+
+  it('gives up after the last delay with a typed error carrying the status', async () => {
+    const booting = bootingServer(10);
+    const client = new JsonRpcClient({ url: await booting.url, retryDelaysMs: [1, 1] });
+    const err = await client.post('ReGa.runScript').then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(BackendUnavailableError);
+    expect(err instanceof BackendUnavailableError ? err.status : 0).toBe(503);
+    expect(booting.requests()).toBe(3);
+  });
+
+  it('never retries a session call (the session manager owns that backoff)', async () => {
+    const booting = bootingServer(10);
+    const client = new JsonRpcClient({ url: await booting.url, retryDelaysMs: [1, 1] });
+    await expect(client.post('Session.login', {})).rejects.toBeInstanceOf(BackendUnavailableError);
+    expect(booting.requests()).toBe(1);
   });
 });

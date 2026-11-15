@@ -6,7 +6,7 @@
 export { LIBRARY_NAME } from './support/version.js';
 
 export { Homematic } from './api/homematic.js';
-export { LoginBackoffError } from './support/errors.js';
+export { BackendUnavailableError, LoginBackoffError } from './support/errors.js';
 export type {
   HomematicOptions,
   HomematicCallback,

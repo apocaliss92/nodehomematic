@@ -54,6 +54,20 @@ export class LoginBackoffError extends BaseHomematicError {
   }
 }
 
+/**
+ * The CCU answered with an HTTP 5xx (typically 503 while it is still booting).
+ * Transient: the call may succeed once the CCU is up.
+ */
+export class BackendUnavailableError extends BaseHomematicError {
+  /** The HTTP status code the CCU answered. */
+  public readonly status: number;
+
+  public constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
 /** Authentication/authorization against the CCU failed. */
 export class AuthFailureError extends BaseHomematicError {}
 
