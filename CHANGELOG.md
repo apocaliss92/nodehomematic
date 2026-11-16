@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-16
+
+### Fixed
+
+- JSON-RPC logins are never locked out: a refused login backs off (1 s doubling, up to 5 min) and all callers share one login attempt; `LoginBackoffError` names the wait.
+- The session heals after a CCU reboot: a call that fails on an expired session logs in again and retries once; a reconnect resets the backoff.
+- A JSON-RPC call that a booting CCU answers with HTTP 5xx is retried after 0.5, 1 and 2 s, then fails with `BackendUnavailableError`.
+
 ## [0.9.0] - 2026-11-14
 
 ### Added
