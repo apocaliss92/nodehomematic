@@ -402,6 +402,18 @@ export class Homematic {
     );
   }
 
+  /**
+   * Re-read device and channel names from the CCU WebUI, so a rename made on
+   * the CCU (or a name given after pairing) shows in `devices()`. Keeps the
+   * names it has when there are no WebUI credentials or the read fails.
+   */
+  public async refreshNames(): Promise<void> {
+    const details = await this.#central.refreshDetails();
+    if (details === undefined) return;
+    this.#renamedNames.clear();
+    for (const [address, name] of details.nameByAddress) this.#renamedNames.set(address, name);
+  }
+
   /** Current value of a data point (resolving the ref). */
   public getValue(ref: DataPointRef): HmValue {
     return this.#resolveDataPoint(ref).value;

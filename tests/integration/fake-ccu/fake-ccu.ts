@@ -290,6 +290,8 @@ export class FakeCcu {
   private reportValueUsageFault: string | undefined;
   /** When true, `Device.listAllDetail` is a JSON-RPC error. */
   private readonly failDeviceDetails: boolean;
+  /** Names the CCU WebUI now reports (a rename done on the CCU), by address. */
+  private readonly detailNames = new Map<string, string>();
   /** When true, every XML-RPC request is refused (simulated outage). */
   private down = false;
   /** When true, the WebUI answers HTTP 503 (a CCU still booting). */
@@ -320,6 +322,27 @@ export class FakeCcu {
     ]);
     this.httpServer = createServer((req, res) => {
       this.handleRequest(req, res);
+    });
+  }
+
+  /** Rename a device or channel as the CCU WebUI would: `Device.listAllDetail` reports it from now on. */
+  public setDetailName(address: string, name: string): void {
+    this.detailNames.set(address, name);
+  }
+
+  private deviceDetail(): ReadonlyArray<Record<string, unknown>> {
+    return CANNED_DEVICE_DETAIL.map((device) => {
+      const channels = device['channels'];
+      return {
+        ...device,
+        name: this.detailNames.get(String(device['address'])) ?? device['name'],
+        channels: Array.isArray(channels)
+          ? channels.map((channel: Record<string, unknown>) => ({
+              ...channel,
+              name: this.detailNames.get(String(channel['address'])) ?? channel['name'],
+            }))
+          : channels,
+      };
     });
   }
 
@@ -899,7 +922,7 @@ export class FakeCcu {
         if (this.failDeviceDetails) {
           return { result: null, error: { code: -32603, message: 'internal error' } };
         }
-        return { result: CANNED_DEVICE_DETAIL, error: null };
+        return { result: this.deviceDetail(), error: null };
       case 'Room.getAll':
         return { result: CANNED_ROOMS, error: null };
       case 'Subsection.getAll':

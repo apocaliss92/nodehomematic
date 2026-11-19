@@ -813,6 +813,17 @@ export class CentralUnit {
   }
 
   /**
+   * Re-read the WebUI names, rooms and functions and keep them for later
+   * discoveries. Resolves `undefined` (and keeps the previous snapshot) when
+   * there is no WebUI login or the read failed.
+   */
+  public async refreshDetails(): Promise<DeviceDetails | undefined> {
+    const fresh = await this.fetchDetails();
+    if (fresh !== undefined) this.details = fresh;
+    return fresh;
+  }
+
+  /**
    * Incrementally (re-)discover a set of device addresses on an interface. Used
    * by `newDevices` / `replaceDevice` / `readdedDevice`. Re-runs the full
    * interface discovery (idempotent: the caches dedup) and re-emits the touched
@@ -825,6 +836,8 @@ export class CentralUnit {
   ): Promise<void> {
     const runtime = this.runtimes.get(interfaceId);
     if (runtime === undefined) return;
+    // The start-time snapshot predates a device that was just paired: re-read it.
+    if (publish) await this.refreshDetails();
     const nodes = await discoverInterface({
       source: runtime.client,
       deviceCache: this.deviceCache,

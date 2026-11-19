@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- `Homematic.refreshNames()` re-reads device and channel names from the CCU WebUI, so a rename done on the CCU shows in `devices()`.
+
+### Fixed
+
+- A `newDevices` / re-added device is named from a fresh WebUI read, not the snapshot taken at `start()`, so a device named after pairing no longer shows without its name.
+
 ## [0.9.1] - 2026-11-16
 
 ### Fixed
