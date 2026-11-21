@@ -4,9 +4,14 @@
  * `unknown` and is narrowed here; a field the CCU left empty is `null`.
  */
 import { ClientError, ValidationError } from '../../support/errors.js';
-import { buildDiagnoseKeyEvents } from '../rega/key-diagnosis.js';
+import {
+  KEY_PROGRAM_CHUNK,
+  buildDiagnoseKeyEvents,
+  buildKeyProgramReferences,
+} from '../rega/key-diagnosis.js';
 import { decodeRegaName } from '../rega/rega-runner.js';
 import type {
+  HmKeyProgramReference,
   HmKeyRegaChannel,
   HmKeyRegaDatapoint,
   HmKeyRegaProgram,
@@ -141,5 +146,42 @@ export class CcuKeyDiagnosis {
         return parsed === null ? [] : [parsed];
       }),
     };
+  }
+
+  /**
+   * The programs whose conditions reference a key data point of `channels`
+   * (`{ interfaceName, address }`), one ReGa scan per {@link KEY_PROGRAM_CHUNK}
+   * channels. A program seen in several chunks is merged by id. A failed or
+   * unparseable answer throws: the caller must not read it as "no program".
+   */
+  public async programReferences(
+    channels: readonly { readonly interfaceName: string; readonly address: string }[],
+  ): Promise<HmKeyProgramReference[]> {
+    const byId = new Map<string, { entry: HmKeyProgramReference; channels: Set<string> }>();
+    for (let i = 0; i < channels.length; i += KEY_PROGRAM_CHUNK) {
+      const label = 'ReGa.runScript(keyProgramReferences)';
+      const answer = await this.#rega(
+        label,
+        buildKeyProgramReferences(channels.slice(i, i + KEY_PROGRAM_CHUNK)),
+      );
+      if (!isRecord(answer) || !Array.isArray(answer['programs'])) {
+        throw new ClientError(`${label}: unexpected answer from the CCU.`);
+      }
+      for (const parsed of records(answer['programs']).flatMap((entry) => {
+        const p = program(entry);
+        return p === null ? [] : [p];
+      })) {
+        const seen = byId.get(parsed.id) ?? {
+          entry: { id: parsed.id, name: parsed.name, active: parsed.active, channels: [] },
+          channels: new Set<string>(),
+        };
+        for (const dp of parsed.datapoints) {
+          const address = dp.split('.')[1];
+          if (address !== undefined && address !== '') seen.channels.add(address);
+        }
+        byId.set(parsed.id, seen);
+      }
+    }
+    return [...byId.values()].map(({ entry, channels: set }) => ({ ...entry, channels: [...set] }));
   }
 }

@@ -270,6 +270,16 @@ export interface HmKeyRegaProgram {
   readonly datapoints: readonly string[];
 }
 
+/** A CCU program whose conditions reference key channels, from {@link Homematic.keyProgramReferences}. */
+export interface HmKeyProgramReference {
+  readonly id: string;
+  readonly name: string;
+  /** `Active()`; `null` when ReGa answered nothing. */
+  readonly active: boolean | null;
+  /** The key channel addresses (`<device>:<n>`) the conditions reference, each once. */
+  readonly channels: readonly string[];
+}
+
 /** What the CCU's ReGa knows about the key channels. */
 export interface HmKeyRegaState {
   readonly channels: readonly HmKeyRegaChannel[];

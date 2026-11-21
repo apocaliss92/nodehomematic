@@ -91,6 +91,7 @@ import type {
   HmGroupUpdate,
   HmInstallModeRequest,
   HmKeyEventDiagnosis,
+  HmKeyProgramReference,
   HmKeyEventProgram,
   HmKeyEventProgramInput,
   HmKeyEventProgramResult,
@@ -574,6 +575,28 @@ export class Homematic {
   /** The key event program `name` and the channels it listens to, or `null`. A duplicate name is a {@link ValidationError}. Needs WebUI credentials. */
   public async getKeyEventProgram(name: string): Promise<HmKeyEventProgram | null> {
     return this.#requireManagement().keyPrograms().get(name);
+  }
+
+  /**
+   * The CCU programs whose conditions reference a key data point of any of
+   * `keyAddresses` (`PRESS_SHORT` / `PRESS_LONG` / `PRESS_LONG_RELEASE`), in
+   * ONE ReGa scan of all programs (chunked at 100 channels). It covers a
+   * program written by hand on the CCU as well as one this library created.
+   * Rejects (never answers `[]`) when the CCU cannot be read, so a caller can
+   * tell "unknown" from "none". An address of no known device is a
+   * {@link ValidationError}. Needs WebUI credentials.
+   */
+  public async keyProgramReferences(
+    keyAddresses: readonly string[],
+  ): Promise<HmKeyProgramReference[]> {
+    const management = this.#requireManagement();
+    const channels = [...new Set(keyAddresses)].map((address) => {
+      const device = this.#devicesByAddress.get(address.split(':')[0] ?? '');
+      if (device === undefined) throw new ValidationError(`Unknown channel "${address}".`);
+      return { interfaceName: interfaceNameOf(device.interfaceId), address };
+    });
+    if (channels.length === 0) return [];
+    return management.keyDiagnosis().programReferences(channels);
   }
 
   /**

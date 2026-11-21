@@ -2,8 +2,11 @@
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-11-21
+
 ### Added
 
+- `Homematic.keyProgramReferences(keyAddresses)` reads, in one ReGa scan of all programs, which CCU programs reference a key channel (`PRESS_SHORT` / `PRESS_LONG`), including programs written by hand on the CCU. It rejects when the CCU cannot be read.
 - `Homematic.refreshNames()` re-reads device and channel names from the CCU WebUI, so a rename done on the CCU shows in `devices()`.
 
 ### Fixed

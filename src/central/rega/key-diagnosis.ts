@@ -60,6 +60,53 @@ export function keyDatapointName(
   return `${interfaceName}.${channelAddress}.${parameter}`;
 }
 
+/**
+ * The scan of `ID_PROGRAMS` against `sTargets` (a `|`-delimited name list the
+ * caller declared): writes one `{"id","name","active",...,"datapoints":[...]}`
+ * object per program whose single conditions reference a target. Shared by the
+ * per-device diagnosis and the cluster-wide key program read.
+ */
+const PROGRAM_SCAN = `string sPrgId;
+string sPSep = "";
+foreach(sPrgId, dom.GetObject(ID_PROGRAMS).EnumUsedIDs()) {
+    object oPrg = dom.GetObject(sPrgId);
+    if (oPrg) {
+        string sRefs = "";
+        string sRSep = "";
+        object oRule = oPrg.Rule();
+        if (oRule) {
+            integer iC = 0;
+            integer iCn = oRule.RuleConditions().Count();
+            while (iC < iCn) {
+                object oCnd = oRule.RuleCondition(iC);
+                if (oCnd) {
+                    integer iN = oCnd.CndSingleCount();
+                    integer iI = 0;
+                    while (iI < iN) {
+                        object oSc = oCnd.CndSingleCondition(iI);
+                        object oLeft = dom.GetObject(oSc.LeftVal());
+                        if (oLeft) {
+                            string sLn = oLeft.Name();
+                            if (sTargets.Find("|" # sLn # "|") != -1) {
+                                sRefs = sRefs # sRSep # "\\"" # sLn # "\\"";
+                                sRSep = ",";
+                            }
+                        }
+                        iI = iI + 1;
+                    }
+                }
+                iC = iC + 1;
+            }
+        }
+        if (sRefs != "") {
+            Write(sPSep);
+            sPSep = ",";
+            Write("{\\"id\\":\\"" # oPrg.ID() # "\\",\\"name\\":\\"" # oPrg.Name().UriEncode() # "\\",\\"active\\":\\"" # oPrg.Active() # "\\",\\"internal\\":\\"" # "" # "\\",\\"lastExecuteSeconds\\":\\"" # oPrg.ProgramLastExecuteTimeSeconds() # "\\",\\"datapoints\\":[" # sRefs # "]}");
+        }
+    }
+}
+`;
+
 function checkedInput(
   interfaceName: string,
   channelAddresses: readonly string[],
@@ -151,44 +198,35 @@ foreach(sId, dom.GetObject(ID_CHANNELS).EnumUsedIDs()) {
 Write("{\\"channels\\":[");
 ${blocks}
 Write("],\\"programs\\":[");
-string sPrgId;
-string sPSep = "";
-foreach(sPrgId, dom.GetObject(ID_PROGRAMS).EnumUsedIDs()) {
-    object oPrg = dom.GetObject(sPrgId);
-    if (oPrg) {
-        string sRefs = "";
-        string sRSep = "";
-        object oRule = oPrg.Rule();
-        if (oRule) {
-            integer iC = 0;
-            integer iCn = oRule.RuleConditions().Count();
-            while (iC < iCn) {
-                object oCnd = oRule.RuleCondition(iC);
-                if (oCnd) {
-                    integer iN = oCnd.CndSingleCount();
-                    integer iI = 0;
-                    while (iI < iN) {
-                        object oSc = oCnd.CndSingleCondition(iI);
-                        object oLeft = dom.GetObject(oSc.LeftVal());
-                        if (oLeft) {
-                            string sLn = oLeft.Name();
-                            if (sTargets.Find("|" # sLn # "|") != -1) {
-                                sRefs = sRefs # sRSep # "\\"" # sLn # "\\"";
-                                sRSep = ",";
-                            }
-                        }
-                        iI = iI + 1;
-                    }
-                }
-                iC = iC + 1;
-            }
-        }
-        if (sRefs != "") {
-            Write(sPSep);
-            sPSep = ",";
-            Write("{\\"id\\":\\"" # oPrg.ID() # "\\",\\"name\\":\\"" # oPrg.Name().UriEncode() # "\\",\\"active\\":\\"" # oPrg.Active() # "\\",\\"internal\\":\\"" # "" # "\\",\\"lastExecuteSeconds\\":\\"" # oPrg.ProgramLastExecuteTimeSeconds() # "\\",\\"datapoints\\":[" # sRefs # "]}");
-        }
-    }
+${PROGRAM_SCAN}
+Write("]}");`;
 }
+
+/** Key data points per script run; keeps `sTargets` and the script bounded. */
+export const KEY_PROGRAM_CHUNK = 100;
+
+/**
+ * Read which programs reference the key data points of `channels` (each
+ * `{ interfaceName, address }`), in one scan of `ID_PROGRAMS`. Emits
+ * `{"programs":[{"id","name":<enc>,"active","internal","lastExecuteSeconds",
+ * "datapoints":["<dp name>"]}]}`.
+ */
+export function buildKeyProgramReferences(
+  channels: readonly { readonly interfaceName: string; readonly address: string }[],
+): string {
+  const targets = channels
+    .flatMap((channel) => {
+      checkedInput(channel.interfaceName, [channel.address]);
+      return KEY_DIAGNOSIS_PARAMETERS.map(
+        (parameter) =>
+          `sTargets = sTargets # "${keyDatapointName(channel.interfaceName, channel.address, parameter)}|";`,
+      );
+    })
+    .join('\n');
+  return `! nodehomematic:keyProgramReferences
+string sTargets = "|";
+${targets}
+Write("{\\"programs\\":[");
+${PROGRAM_SCAN}
 Write("]}");`;
 }

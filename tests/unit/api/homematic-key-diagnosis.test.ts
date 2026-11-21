@@ -51,11 +51,12 @@ class StubClient {
 
 class RegaJson implements JsonRpcClientLike {
   public readonly scripts: string[] = [];
+  public answer: unknown = { channels: [], programs: [] };
   public post(method: string, params?: Record<string, unknown>): Promise<unknown> {
     if (method === JsonRpcMethod.REGA_RUN_SCRIPT) {
       const script = params?.['script'];
       if (typeof script === 'string') this.scripts.push(script);
-      return Promise.resolve(JSON.stringify({ channels: [], programs: [] }));
+      return Promise.resolve(JSON.stringify(this.answer));
     }
     return Promise.resolve([]);
   }
@@ -125,5 +126,51 @@ describe('Homematic.diagnoseKeyEvents', () => {
     const result = await hm.diagnoseKeyEvents('VCU1');
     expect(result.channels).toHaveLength(1);
     expect(result.rega.available).toBe(false);
+  });
+});
+
+describe('Homematic.keyProgramReferences', () => {
+  let hm: Homematic | undefined;
+  let json: RegaJson;
+  beforeEach(async () => {
+    json = new RegaJson();
+    hm = await facade(true, json);
+  });
+  afterEach(async () => {
+    await hm?.stop();
+    hm = undefined;
+  });
+
+  it('lists a hand-written program by the key channel its condition references, in one script', async () => {
+    json.answer = {
+      programs: [
+        {
+          id: '4711',
+          name: 'Klingel%20Dummy',
+          active: 'true',
+          internal: '',
+          lastExecuteSeconds: '0',
+          datapoints: ['HmIP-RF.VCU1:1.PRESS_SHORT', 'HmIP-RF.VCU1:1.PRESS_LONG'],
+        },
+      ],
+    };
+    const result = await hm?.keyProgramReferences(['VCU1:1']);
+    expect(result).toEqual([
+      { id: '4711', name: 'Klingel Dummy', active: true, channels: ['VCU1:1'] },
+    ]);
+    const scripts = json.scripts.filter((s) => s.includes('nodehomematic:keyProgramReferences'));
+    expect(scripts).toHaveLength(1);
+    expect(scripts[0]).toContain('HmIP-RF.VCU1:1.PRESS_LONG_RELEASE');
+  });
+
+  it('answers [] only when ReGa answered with no program, and throws on an unparseable answer', async () => {
+    json.answer = { programs: [] };
+    await expect(hm?.keyProgramReferences(['VCU1:1'])).resolves.toEqual([]);
+    json.answer = 'garbage';
+    await expect(hm?.keyProgramReferences(['VCU1:1'])).rejects.toThrow();
+  });
+
+  it('rejects an address of no known device', async () => {
+    await expect(hm?.keyProgramReferences(['NOPE:1'])).rejects.toBeInstanceOf(ValidationError);
   });
 });
